@@ -122,3 +122,54 @@ def test_full_game_through_ui_action_paths(app, monkeypatch, opponents):
             assert not app.autosave_error, app.toast
     assert app.game.winner is not None
     assert {"setup_settlement", "setup_road", "roll", "main", "trade", "robber", "victim", "game_over"} <= rendered
+
+
+@pytest.mark.parametrize("size", [(960, 640), (1280, 854), (1440, 960), (1500, 800)])
+def test_native_rendering_and_input_survive_resize(app, monkeypatch, size):
+    app.window = pg.display.set_mode(size)
+    app.menu = False
+    original_scale = pg.transform.smoothscale
+    def scale_art_only(surface, *args, **kwargs):
+        # Scaling a completed interface reintroduces blurry text. Terrain art
+        # may still be resampled to fit its hexes.
+        assert surface is not app.canvas
+        return original_scale(surface, *args, **kwargs)
+    monkeypatch.setattr(pg.transform, "smoothscale", scale_art_only)
+    app.render()
+    scale, viewport = app.viewport()
+    assert app.canvas.get_size() == viewport.size
+    g = app.game
+    g.current = 0
+    g.setup_order = [0, 1, 2, 3, 3, 2, 1, 0]
+    vertex = g.settlement_sites(0, True)[0]
+    native = app.point(app.screen_point(vertex))
+    mouse = (native[0] + viewport.x, native[1] + viewport.y)
+    app.board_click(app.mouse(mouse))
+    assert g.buildings[vertex] == [0, 1]
+    assert g.phase == "setup_road"
+    for kind in ("offer", "bank", "journal"):
+        app.open_modal(kind)
+        app.render()
+        assert app.buttons
+        # A modal's close button must map to its visible native position.
+        close = app.buttons[0][0]
+        screen = app.point(close.center)
+        logical = app.mouse((screen[0] + viewport.x, screen[1] + viewport.y))
+        assert close.collidepoint(logical)
+    app.modal = None
+    app.menu = True
+    app.render()
+
+
+def test_water_has_blue_hexagonal_outline(app):
+    from unsettled.ui import WATER, INK
+    app.window = pg.display.set_mode((1440, 960))
+    app.menu = False
+    app.render()
+    # Water reaches the six-sided frame's tips; its cutaway corners reveal the
+    # surrounding tabletop rather than filling an oval or rectangle.
+    assert app.canvas.get_at((120, 424))[:3] == WATER
+    assert app.canvas.get_at((900, 424))[:3] == WATER
+    assert app.canvas.get_at((520, 80))[:3] == WATER
+    assert app.canvas.get_at((200, 200))[:3] == INK
+    assert app.canvas.get_at((840, 640))[:3] == INK

@@ -14,6 +14,9 @@ PANEL = (24, 46, 53)
 LIGHT = (244, 235, 214)
 MUTED = (162, 185, 181)
 GOLD = (222, 180, 105)
+WATER = (135, 198, 228)
+WATER_RIM = (184, 224, 242)
+WATER_LINE = (102, 169, 204)
 COLORS = [(232, 137, 99), (113, 184, 165), (189, 163, 223), (111, 171, 210)]
 TERRAIN = [(46, 108, 77), (164, 88, 62), (190, 156, 74), (111, 149, 84), (112, 126, 133), (206, 179, 127)]
 TILE_ORDER = ["wood", "brick", "wheat", "sheep", "ore", "desert"]
@@ -26,6 +29,8 @@ class App:
         pg.display.set_caption("Unsettled • An island of your own")
         self.window = pg.display.set_mode((1280, 854), pg.RESIZABLE)
         self.canvas = pg.Surface((W, H))
+        self.scale = 1.0
+        self.sync_canvas()
         self.clock = pg.time.Clock()
         self.fonts = {}
         self.game = Game(bots=bots, seed=seed)
@@ -54,12 +59,14 @@ class App:
     def font(self, size, serif=False, bold=False):
         key = (size, serif, bold)
         if key not in self.fonts:
-            self.fonts[key] = pg.font.SysFont("Georgia" if serif else "Helvetica", size, bold=bold)
+            self.fonts[key] = pg.font.SysFont("Georgia" if serif else "Arial", size, bold=bold)
         return self.fonts[key]
 
     def text(self, text, x, y, size=20, color=LIGHT, serif=False, bold=False, center=False):
-        surface = self.font(size, serif, bold).render(str(text), True, color)
-        self.canvas.blit(surface, surface.get_rect(center=(x, y)) if center else (x, y))
+        # Rasterize glyphs once at their final size, never resize rendered text.
+        surface = self.font(max(1, round(size * self.scale)), serif, bold).render(str(text), True, color)
+        position = self.point((x, y))
+        self.canvas.blit(surface, surface.get_rect(center=position) if center else position)
 
     def wrap(self, text, x, y, width, size=18, color=MUTED, max_lines=6):
         words, line, lines = str(text).split(), "", []
@@ -76,10 +83,48 @@ class App:
             self.text(line, x, y + i * (size + 5), size, color)
         return min(len(lines), max_lines) * (size + 5)
 
+    def viewport(self):
+        """One transform shared by native-pixel rendering and mouse hit testing."""
+        width, height = self.window.get_size()
+        scale = min(width / W, height / H)
+        size = (round(W * scale), round(H * scale))
+        return scale, pg.Rect((width - size[0]) // 2, (height - size[1]) // 2, *size)
+
+    def sync_canvas(self):
+        self.scale, viewport = self.viewport()
+        if self.canvas.get_size() != viewport.size:
+            self.canvas = pg.Surface(viewport.size)
+
+    def point(self, point):
+        return (round(point[0] * self.scale), round(point[1] * self.scale))
+
+    def rect(self, rect):
+        x, y, width, height = rect
+        left, top = self.point((x, y))
+        right, bottom = self.point((x + width, y + height))
+        return pg.Rect(left, top, right - left, bottom - top)
+
+    def stroke(self, width):
+        return max(1, round(width * self.scale)) if width else 0
+
+    def polygon(self, color, points, width=0):
+        pg.draw.polygon(self.canvas, color, [self.point(p) for p in points], self.stroke(width))
+
+    def line(self, color, start, end, width=1):
+        pg.draw.line(self.canvas, color, self.point(start), self.point(end), self.stroke(width))
+
+    def circle(self, color, center, radius, width=0):
+        pg.draw.circle(self.canvas, color, self.point(center), max(1, round(radius * self.scale)), self.stroke(width))
+
+    def ellipse(self, color, rect, width=0):
+        pg.draw.ellipse(self.canvas, color, self.rect(rect), self.stroke(width))
+
     def panel(self, rect, color=PANEL, radius=16, border=None):
-        pg.draw.rect(self.canvas, color, rect, border_radius=radius)
+        native_rect = self.rect(rect)
+        native_radius = max(0, round(radius * self.scale))
+        pg.draw.rect(self.canvas, color, native_rect, border_radius=native_radius)
         if border:
-            pg.draw.rect(self.canvas, border, rect, 1, border_radius=radius)
+            pg.draw.rect(self.canvas, border, native_rect, self.stroke(1), border_radius=native_radius)
 
     def button(self, label, rect, callback, active=True, accent=False, small=False):
         rect = pg.Rect(rect)
@@ -96,9 +141,8 @@ class App:
 
     def mouse(self, pos=None):
         pos = pos or pg.mouse.get_pos()
-        width, height = self.window.get_size()
-        scale = min(width / W, height / H)
-        return ((pos[0] - (width - W * scale) / 2) / scale, (pos[1] - (height - H * scale) / 2) / scale)
+        scale, viewport = self.viewport()
+        return ((pos[0] - viewport.x) / scale, (pos[1] - viewport.y) / scale)
 
     def notify(self, message, duration=5500):
         self.toast, self.toast_until = message, pg.time.get_ticks() + duration
@@ -178,8 +222,9 @@ class App:
         return (int(520 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(424 + 1.5 * tile["r"] * 79))
 
     def tile(self, resource):
-        if resource in self.tile_cache:
-            return self.tile_cache[resource]
+        key = (resource, self.scale)
+        if key in self.tile_cache:
+            return self.tile_cache[key]
         index = TILE_ORDER.index(resource)
         size = 162
         surface = pg.Surface((size, size), pg.SRCALPHA)
@@ -199,20 +244,29 @@ class App:
         pg.draw.polygon(framed, (224, 185, 121), outer)
         framed.blit(surface, (0, 0))
         pg.draw.polygon(framed, (184, 148, 93), points, 1)
-        self.tile_cache[resource] = framed
+        native_size = max(1, round(size * self.scale))
+        if native_size != size:
+            framed = pg.transform.smoothscale(framed, (native_size, native_size))
+        self.tile_cache[key] = framed
         return framed
+
+    @staticmethod
+    def water_outline(radius=414):
+        return [(520 + radius * math.cos(i * math.pi / 3),
+                 424 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
 
     def draw_board(self):
         g = self.game
-        # Layered coast and subtle wave strokes behind the illustrated terrain.
-        pg.draw.ellipse(self.canvas, (27, 65, 74), (108, 66, 824, 722))
-        pg.draw.ellipse(self.canvas, (36, 81, 87), (143, 95, 755, 657), 2)
+        # A regular six-sided sea frame surrounds the island and its ports.
+        self.polygon(WATER_RIM, self.water_outline())
+        self.polygon(WATER, self.water_outline(408))
+        self.polygon(WATER_LINE, self.water_outline(395), 1)
         for i in range(19):
             cx, cy = self.hex_center(i)
             points = [self.screen_point(v) for v in g.board.hex_vertices[i]]
-            pg.draw.polygon(self.canvas, (211, 190, 145), [(int(cx + (x - cx) * 1.028), int(cy + (y - cy) * 1.028)) for x, y in points])
-            self.canvas.blit(self.tile(g.board.hexes[i]["resource"]), (cx - 81, cy - 81))
-            pg.draw.polygon(self.canvas, (112, 107, 78), points, 1)
+            self.polygon((211, 190, 145), [(int(cx + (x - cx) * 1.028), int(cy + (y - cy) * 1.028)) for x, y in points])
+            self.canvas.blit(self.tile(g.board.hexes[i]["resource"]), self.point((cx - 81, cy - 81)))
+            self.polygon((112, 107, 78), points, 1)
         for edge, kind in g.board.ports.items():
             a, b = [self.screen_point(v) for v in g.board.edges[edge]]
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
@@ -220,49 +274,49 @@ class App:
             length = math.hypot(dx, dy)
             x, y = mid[0] + dx / length * 41, mid[1] + dy / length * 41
             for end in (a, b):
-                pg.draw.line(self.canvas, (151, 153, 122), end, (x, y), 2)
+                self.line((151, 153, 122), end, (x, y), 2)
             self.panel((x - 34, y - 14, 68, 29), INK, 7, (105, 137, 136))
             self.text("3:1" if kind == "any" else kind[:2].upper() + " 2:1", x, y + 1, 14, GOLD, center=True)
         for i, tile in enumerate(g.board.hexes):
             cx, cy = self.hex_center(i)
             n = tile["number"]
             if n:
-                pg.draw.circle(self.canvas, (36, 44, 39), (cx + 1, cy + 3), 25)
-                pg.draw.circle(self.canvas, (244, 227, 187), (cx, cy), 24)
-                pg.draw.circle(self.canvas, (180, 153, 107), (cx, cy), 24, 2)
+                self.circle((36, 44, 39), (cx + 1, cy + 3), 25)
+                self.circle((244, 227, 187), (cx, cy), 24)
+                self.circle((180, 153, 107), (cx, cy), 24, 2)
                 self.text(n, cx, cy - 3, 27, (164, 66, 48) if n in (6, 8) else INK, bold=True, center=True)
                 dots = 6 - abs(7 - n)
                 for j in range(dots):
-                    pg.draw.circle(self.canvas, (164, 66, 48) if n in (6, 8) else INK, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
+                    self.circle((164, 66, 48) if n in (6, 8) else INK, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
         for edge, owner in g.roads.items():
             a, b = [self.screen_point(v) for v in g.board.edges[edge]]
-            pg.draw.line(self.canvas, INK, a, b, 12)
-            pg.draw.line(self.canvas, COLORS[owner], a, b, 7)
+            self.line(INK, a, b, 12)
+            self.line(COLORS[owner], a, b, 7)
         for v, (owner, size) in g.buildings.items():
             self.draw_piece(v, owner, size)
         cx, cy = self.hex_center(g.robber)
         cx += 35
         cy -= 21
-        pg.draw.ellipse(self.canvas, (23, 35, 39), (cx - 11, cy + 10, 24, 10))
-        pg.draw.polygon(self.canvas, (51, 56, 62), [(cx - 9, cy + 13), (cx - 5, cy - 8), (cx + 5, cy - 8), (cx + 10, cy + 13)])
-        pg.draw.circle(self.canvas, (43, 49, 57), (cx, cy - 12), 8)
-        pg.draw.circle(self.canvas, (137, 148, 145), (cx - 2, cy - 14), 2)
+        self.ellipse((23, 35, 39), (cx - 11, cy + 10, 24, 10))
+        self.polygon((51, 56, 62), [(cx - 9, cy + 13), (cx - 5, cy - 8), (cx + 5, cy - 8), (cx + 10, cy + 13)])
+        self.circle((43, 49, 57), (cx, cy - 12), 8)
+        self.circle((137, 148, 145), (cx - 2, cy - 14), 2)
         if not self.menu and g.actor == 0 and g.phase != "game_over":
             mode = self.active_mode()
             pulse = 4 + int(math.sin(pg.time.get_ticks() / 230) * 2)
             if mode in ("settlement", "city"):
                 sites = g.city_sites(0) if mode == "city" else g.settlement_sites(0, g.phase == "setup_settlement")
                 for v in sites:
-                    pg.draw.circle(self.canvas, LIGHT, self.screen_point(v), 10, 2)
-                    pg.draw.circle(self.canvas, GOLD, self.screen_point(v), pulse)
+                    self.circle(LIGHT, self.screen_point(v), 10, 2)
+                    self.circle(GOLD, self.screen_point(v), pulse)
             elif mode == "road":
                 for e in g.road_sites(0, g.setup_vertex if g.phase == "setup_road" else None):
                     a, b = [self.screen_point(v) for v in g.board.edges[e]]
-                    pg.draw.line(self.canvas, GOLD, a, b, 4)
+                    self.line(GOLD, a, b, 4)
             elif g.phase == "robber":
                 for i in range(19):
                     if i != g.robber:
-                        pg.draw.polygon(self.canvas, GOLD, [self.screen_point(v) for v in g.board.hex_vertices[i]], 3)
+                        self.polygon(GOLD, [self.screen_point(v) for v in g.board.hex_vertices[i]], 3)
 
     def draw_piece(self, v, owner, size):
         x, y = self.screen_point(v)
@@ -270,10 +324,10 @@ class App:
             shape = [(x - 10, y + 8), (x - 10, y - 4), (x, y - 13), (x + 10, y - 4), (x + 10, y + 8)]
         else:
             shape = [(x - 15, y + 9), (x - 15, y - 5), (x - 8, y - 12), (x - 1, y - 5), (x - 1, y - 16), (x + 7, y - 21), (x + 15, y - 16), (x + 15, y + 9)]
-        pg.draw.polygon(self.canvas, INK, shape)
-        pg.draw.polygon(self.canvas, COLORS[owner], shape)
-        pg.draw.polygon(self.canvas, INK, shape, 2)
-        pg.draw.line(self.canvas, (246, 228, 196), (x - 7, y + 5), (x + 5, y + 5), 2)
+        self.polygon(INK, shape)
+        self.polygon(COLORS[owner], shape)
+        self.polygon(INK, shape, 2)
+        self.line((246, 228, 196), (x - 7, y + 5), (x + 5, y + 5), 2)
 
     def active_mode(self):
         return {"setup_settlement": "settlement", "setup_road": "road", "road_building": "road"}.get(self.game.phase, self.mode)
@@ -290,7 +344,7 @@ class App:
             self.button(["Slow", "Normal", "Fast"][self.speed], (1118, 27, 92, 38), self.cycle_speed, small=True)
             self.button("Menu", (1220, 27, 90, 38), self.toggle_menu, small=True)
             self.text(f"Island {self.game.seed}", 1329, 80, 12, MUTED, center=True)
-        pg.draw.line(self.canvas, (57, 83, 85), (40, 97), (1400, 97))
+        self.line((57, 83, 85), (40, 97), (1400, 97))
 
     def cycle_speed(self):
         self.speed = (self.speed + 1) % 3
@@ -300,7 +354,7 @@ class App:
         for i, p in enumerate(g.players):
             y = 117 + i * 66
             self.panel((1045, y, 355, 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
-            pg.draw.circle(self.canvas, COLORS[i], (1065, y + 20), 5)
+            self.circle(COLORS[i], (1065, y + 20), 5)
             self.text(p.name, 1080, y + 9, 20, LIGHT, bold=True)
             points = g.points(i, i == 0 or g.winner is not None)
             self.text(f"{points} VP", 1340, y + 9, 20, GOLD, bold=True)
@@ -359,7 +413,7 @@ class App:
 
     def resource_icon(self, r, x, y):
         color = TERRAIN[TILE_ORDER.index(r)]
-        pg.draw.circle(self.canvas, color, (x, y), 13)
+        self.circle(color, (x, y), 13)
         letter = {"wood": "W", "brick": "B", "wheat": "G", "sheep": "S", "ore": "O"}[r]
         self.text(letter, x, y, 14, LIGHT, bold=True, center=True)
 
@@ -395,9 +449,9 @@ class App:
         self.button("Journal", (1280, 702, 100, 29), lambda: self.open_modal("journal"), small=True)
 
     def draw_menu(self):
-        shade = pg.Surface((W, H), pg.SRCALPHA)
+        shade = pg.Surface(self.canvas.get_size(), pg.SRCALPHA)
         shade.fill((11, 28, 35, 175))
-        self.canvas.blit(shade, (0, 98))
+        self.canvas.blit(shade, self.point((0, 98)))
         self.text("A little island.", 80, 270, 65, LIGHT, serif=True)
         self.text("A whole evening.", 80, 345, 65, LIGHT, serif=True)
         self.wrap("Gather. Trade. Build. Settle in for a game at your own pace, with a table that is always ready.", 86, 455, 540, 24, LIGHT, 4)
@@ -446,7 +500,7 @@ class App:
 
     def draw_modal(self):
         m = self.modal
-        shade = pg.Surface((W, H), pg.SRCALPHA)
+        shade = pg.Surface(self.canvas.get_size(), pg.SRCALPHA)
         shade.fill((6, 18, 24, 210))
         self.canvas.blit(shade, (0, 0))
         # Remove underlying hit targets; modal owns input until dismissed.
@@ -533,6 +587,10 @@ class App:
         return ", ".join(f"{n} {r}" for r, n in bundle.items() if n)
 
     def render(self):
+        previous_scale = self.scale
+        self.sync_canvas()
+        if self.scale != previous_scale:
+            self.tile_cache.clear()
         self.buttons = []
         self.canvas.fill(INK)
         self.draw_board()
@@ -549,11 +607,9 @@ class App:
         if self.toast and pg.time.get_ticks() < self.toast_until:
             self.panel((300, 103, 820, 48), (81, 62, 44), 10, GOLD)
             self.wrap(self.toast, 317, 116, 786, 16, LIGHT, 1)
-        width, height = self.window.get_size()
-        scale = min(width / W, height / H)
-        scaled = pg.transform.smoothscale(self.canvas, (round(W * scale), round(H * scale)))
+        _, viewport = self.viewport()
         self.window.fill((10, 23, 29))
-        self.window.blit(scaled, ((width - scaled.get_width()) // 2, (height - scaled.get_height()) // 2))
+        self.window.blit(self.canvas, viewport.topleft)
         pg.display.flip()
 
     def board_click(self, pos):
