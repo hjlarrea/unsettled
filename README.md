@@ -8,12 +8,9 @@ while playing.
 
 ![The illustrated Unsettled board](docs/board.png)
 
-The `feat/daylight-theme` experiment branch now keeps the original dark interface
-and explores terrain closer to physical board-game tiles: compact woodland,
-terracotta quarries, golden fields, green pastures, lavender mountains, and sandy
-hex borders. The original art and interface remain on `main`. Close the app
-before switching branches, then relaunch with `.venv/bin/python -m unsettled`
-to compare them. Existing saves work with either version.
+The dark tabletop uses illustrated woodland, terracotta quarries, golden fields,
+green pastures, lavender mountains, and sandy tile borders, surrounded by a
+light-blue hexagonal sea. Text renders at the window's native resolution.
 
 ## Set up on macOS
 
@@ -82,7 +79,12 @@ Click **Set sail** to start.
   decision has a time limit. Open **Menu** to pause and configure a new game.
 - **Journal** or **L** opens the public event history. **Escape** closes a dialog,
   cancels a selected build tool, or opens/closes the menu. **Cmd+S** / **Ctrl+S**
-  saves manually. You can resize the window; the board keeps its proportions.
+  saves manually.
+- **Full screen**, **F11**, or **Cmd+F** / **Ctrl+F** toggles full-screen mode.
+  **Escape** returns to the window after closing any dialog or build tool.
+  Resizing and full-screen mode use the entire window: controls anchor to the
+  right, resources to the bottom, and the board centers in the remaining area.
+  Tiles keep their proportions and text stays sharp.
 
 Your resource cards and development-card identities remain private. Opponent
 hand sizes, development-card counts, played knights, and public victory points

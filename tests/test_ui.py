@@ -124,7 +124,7 @@ def test_full_game_through_ui_action_paths(app, monkeypatch, opponents):
     assert {"setup_settlement", "setup_road", "roll", "main", "trade", "robber", "victim", "game_over"} <= rendered
 
 
-@pytest.mark.parametrize("size", [(960, 640), (1280, 854), (1440, 960), (1500, 800)])
+@pytest.mark.parametrize("size", [(960, 640), (1280, 854), (1440, 960), (1920, 1080), (2560, 1080), (1280, 1024)])
 def test_native_rendering_and_input_survive_resize(app, monkeypatch, size):
     app.window = pg.display.set_mode(size)
     app.menu = False
@@ -137,7 +137,12 @@ def test_native_rendering_and_input_survive_resize(app, monkeypatch, size):
     monkeypatch.setattr(pg.transform, "smoothscale", scale_art_only)
     app.render()
     scale, viewport = app.viewport()
-    assert app.canvas.get_size() == viewport.size
+    assert app.canvas.get_size() == size
+    assert viewport == pg.Rect(0, 0, *size)
+    # The sidebar follows the right edge at every aspect ratio.
+    sidebar = app.rect((1045 + app.width - 1440, 117, 355, 58))
+    assert app.canvas.get_at(sidebar.center)[:3] != (18, 38, 46)
+    assert size[0] - sidebar.right == pytest.approx(40 * scale, abs=1)
     g = app.game
     g.current = 0
     g.setup_order = [0, 1, 2, 3, 3, 2, 1, 0]
@@ -173,3 +178,46 @@ def test_water_has_blue_hexagonal_outline(app):
     assert app.canvas.get_at((520, 80))[:3] == WATER
     assert app.canvas.get_at((200, 200))[:3] == INK
     assert app.canvas.get_at((840, 640))[:3] == INK
+
+
+def test_fullscreen_restores_window_and_preserves_game(app, monkeypatch):
+    # SDL's dummy driver cannot restore a window after a fullscreen switch.
+    # Verify our mode requests and state using an explicit desktop surface.
+    requests = []
+    def set_mode(size, flags):
+        requests.append((size, flags))
+        return pg.Surface((1920, 1080) if flags & pg.FULLSCREEN else size)
+    monkeypatch.setattr(pg.display, "set_mode", set_mode)
+    monkeypatch.setattr(pg.display, "flip", lambda: None)
+    before = app.game.to_dict()
+    size = app.window.get_size()
+    app.toggle_fullscreen()
+    app.render()
+    assert app.fullscreen
+    assert requests[-1] == ((0, 0), pg.FULLSCREEN)
+    assert app.canvas.get_size() == app.window.get_size()
+    app.toggle_fullscreen()
+    app.render()
+    assert not app.fullscreen
+    assert app.window.get_size() == size
+    assert requests[-1] == (size, pg.RESIZABLE)
+    assert app.game.to_dict() == before
+
+
+def test_translated_controls_dispatch_at_visible_position(app):
+    app.window = pg.display.set_mode((1920, 1080))
+    app.menu = False
+    app.render()
+    # Click the relocated Menu button through the same hit targets as run().
+    logical = (1265 + app.width - 1440, 46)
+    pos = app.mouse(app.point(logical))
+    matches = [callback for rect, callback in app.buttons if rect.collidepoint(pos)]
+    assert len(matches) == 1
+    matches[0]()
+    assert app.menu
+    app.open_modal("journal")
+    app.render()
+    close, callback = app.buttons[0]
+    assert close.collidepoint(app.mouse(app.point(close.center)))
+    callback()
+    assert app.modal is None

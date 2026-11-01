@@ -1,6 +1,7 @@
 """Pygame presentation. The engine remains the sole authority for legal actions."""
 from __future__ import annotations
 import math
+from contextlib import contextmanager
 import os
 import random
 from pathlib import Path
@@ -30,6 +31,9 @@ class App:
         self.window = pg.display.set_mode((1280, 854), pg.RESIZABLE)
         self.canvas = pg.Surface((W, H))
         self.scale = 1.0
+        self.offset = (0, 0)
+        self.fullscreen = False
+        self.windowed_size = self.window.get_size()
         self.sync_canvas()
         self.clock = pg.time.Clock()
         self.fonts = {}
@@ -87,16 +91,37 @@ class App:
         """One transform shared by native-pixel rendering and mouse hit testing."""
         width, height = self.window.get_size()
         scale = min(width / W, height / H)
-        size = (round(W * scale), round(H * scale))
-        return scale, pg.Rect((width - size[0]) // 2, (height - size[1]) // 2, *size)
+        return scale, pg.Rect(0, 0, width, height)
 
     def sync_canvas(self):
         self.scale, viewport = self.viewport()
+        self.width = viewport.width / self.scale
+        self.height = viewport.height / self.scale
         if self.canvas.get_size() != viewport.size:
             self.canvas = pg.Surface(viewport.size)
 
     def point(self, point):
-        return (round(point[0] * self.scale), round(point[1] * self.scale))
+        return (round((point[0] + self.offset[0]) * self.scale),
+                round((point[1] + self.offset[1]) * self.scale))
+
+    @contextmanager
+    def shifted(self, x=0, y=0):
+        previous = self.offset
+        self.offset = (previous[0] + x, previous[1] + y)
+        try:
+            yield
+        finally:
+            self.offset = previous
+
+    def toggle_fullscreen(self):
+        if self.fullscreen:
+            self.window = pg.display.set_mode(self.windowed_size, pg.RESIZABLE)
+        else:
+            self.windowed_size = self.window.get_size()
+            self.window = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+        self.fullscreen = not self.fullscreen
+        self.sync_canvas()
+        self.tile_cache.clear()
 
     def rect(self, rect):
         x, y, width, height = rect
@@ -129,7 +154,7 @@ class App:
     def button(self, label, rect, callback, active=True, accent=False, small=False):
         rect = pg.Rect(rect)
         mouse = self.mouse()
-        hover = rect.collidepoint(mouse)
+        hover = rect.move(self.offset).collidepoint(mouse)
         color = GOLD if accent else (49, 77, 83) if hover and active else (34, 61, 68)
         if not active:
             color = (28, 46, 52)
@@ -137,7 +162,7 @@ class App:
         self.text(label, rect.centerx, rect.centery, 16 if small else 19,
                   INK if accent else LIGHT if active else (91, 116, 119), bold=accent, center=True)
         if active:
-            self.buttons.append((rect, callback))
+            self.buttons.append((rect.move(self.offset), callback))
 
     def mouse(self, pos=None):
         pos = pos or pg.mouse.get_pos()
@@ -215,11 +240,12 @@ class App:
 
     def screen_point(self, v):
         x, y = self.game.board.vertices[v]
-        return (int(520 + x * 79), int(424 + y * 79))
+        return (int(520 + (self.width - W) / 2 + x * 79),
+                int(424 + (self.height - H) / 2 + y * 79))
 
     def hex_center(self, h):
         tile = self.game.board.hexes[h]
-        return (int(520 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(424 + 1.5 * tile["r"] * 79))
+        return (int(520 + (self.width - W) / 2 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(424 + (self.height - H) / 2 + 1.5 * tile["r"] * 79))
 
     def tile(self, resource):
         key = (resource, self.scale)
@@ -250,10 +276,9 @@ class App:
         self.tile_cache[key] = framed
         return framed
 
-    @staticmethod
-    def water_outline(radius=414):
-        return [(520 + radius * math.cos(i * math.pi / 3),
-                 424 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
+    def water_outline(self, radius=414):
+        return [(520 + (self.width - W) / 2 + radius * math.cos(i * math.pi / 3),
+                 424 + (self.height - H) / 2 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
 
     def draw_board(self):
         g = self.game
@@ -270,7 +295,7 @@ class App:
         for edge, kind in g.board.ports.items():
             a, b = [self.screen_point(v) for v in g.board.edges[edge]]
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-            dx, dy = mid[0] - 520, mid[1] - 424
+            dx, dy = mid[0] - 520 - (self.width - W) / 2, mid[1] - 424 - (self.height - H) / 2
             length = math.hypot(dx, dy)
             x, y = mid[0] + dx / length * 41, mid[1] + dy / length * 41
             for end in (a, b):
@@ -338,13 +363,15 @@ class App:
     def draw_header(self):
         self.text("UNSETTLED", 40, 21, 38, LIGHT, serif=True)
         self.text("AN ISLAND OF YOUR OWN", 43, 65, 12, GOLD, bold=True)
-        if not self.menu:
-            self.button("Save", (942, 27, 78, 38), self.manual_save, small=True)
-            self.button("Load", (1030, 27, 78, 38), lambda: self.load(True), small=True)
-            self.button(["Slow", "Normal", "Fast"][self.speed], (1118, 27, 92, 38), self.cycle_speed, small=True)
-            self.button("Menu", (1220, 27, 90, 38), self.toggle_menu, small=True)
-            self.text(f"Island {self.game.seed}", 1329, 80, 12, MUTED, center=True)
-        self.line((57, 83, 85), (40, 97), (1400, 97))
+        with self.shifted(self.width - W):
+            if not self.menu:
+                self.button("Save", (942, 27, 78, 38), self.manual_save, small=True)
+                self.button("Load", (1030, 27, 78, 38), lambda: self.load(True), small=True)
+                self.button(["Slow", "Normal", "Fast"][self.speed], (1118, 27, 92, 38), self.cycle_speed, small=True)
+                self.button("Menu", (1220, 27, 90, 38), self.toggle_menu, small=True)
+                self.text(f"Island {self.game.seed}", 1329, 80, 12, MUTED, center=True)
+            self.button("Window" if self.fullscreen else "Full screen", (1320, 27, 100, 38), self.toggle_fullscreen, small=True)
+        self.line((57, 83, 85), (40, 97), (self.width - 40, 97))
 
     def cycle_speed(self):
         self.speed = (self.speed + 1) % 3
@@ -407,9 +434,10 @@ class App:
                     self.button(g.players[victim].name, (1060, y + i * 44, 320, 37), lambda v=victim: self.act("steal", victim=v))
             elif g.phase == "road_building":
                 self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"))
-        if g.dice:
-            self.text(f"LAST ROLL   {g.dice[0]} + {g.dice[1]} = {sum(g.dice)}", 50, 751, 16, GOLD, bold=True)
-        self.text(f"TURN {g.turn + 1}", 910, 751, 14, MUTED)
+        with self.shifted(-(self.width - W) / 2, self.height - H):
+            if g.dice:
+                self.text(f"LAST ROLL   {g.dice[0]} + {g.dice[1]} = {sum(g.dice)}", 50, 751, 16, GOLD, bold=True)
+            self.text(f"TURN {g.turn + 1}", 910, 751, 14, MUTED)
 
     def resource_icon(self, r, x, y):
         color = TERRAIN[TILE_ORDER.index(r)]
@@ -420,12 +448,13 @@ class App:
     def draw_hand(self):
         g = self.game
         self.text("YOUR RESOURCES", 45, 795, 13, GOLD, bold=True)
-        self.text("BUILDING COSTS", 1060, 805, 13, GOLD, bold=True)
-        for i, (kind, cost) in enumerate(COSTS.items()):
-            self.text(kind.title(), 1060, 831 + i * 27, 15, LIGHT)
-            self.text("  ".join(f"{n}{r[:2]}" for r, n in cost.items()), 1168, 831 + i * 27, 14, MUTED)
+        with self.shifted(self.width - W):
+            self.text("BUILDING COSTS", 1060, 805, 13, GOLD, bold=True)
+            for i, (kind, cost) in enumerate(COSTS.items()):
+                self.text(kind.title(), 1060, 831 + i * 27, 15, LIGHT)
+                self.text("  ".join(f"{n}{r[:2]}" for r, n in cost.items()), 1168, 831 + i * 27, 14, MUTED)
         for i, r in enumerate(RESOURCES):
-            x = 44 + i * 195
+            x = 44 + i * (195 + (self.width - W) / 4)
             self.panel((x, 818, 182, 65), (32, 56, 61), 10)
             self.resource_icon(r, x + 24, 844)
             self.text(r.title(), x + 45, 829, 19, LIGHT)
@@ -451,7 +480,7 @@ class App:
     def draw_menu(self):
         shade = pg.Surface(self.canvas.get_size(), pg.SRCALPHA)
         shade.fill((11, 28, 35, 175))
-        self.canvas.blit(shade, self.point((0, 98)))
+        self.canvas.blit(shade, (0, round(98 * self.scale)))
         self.text("A little island.", 80, 270, 65, LIGHT, serif=True)
         self.text("A whole evening.", 80, 345, 65, LIGHT, serif=True)
         self.wrap("Gather. Trade. Build. Settle in for a game at your own pace, with a table that is always ready.", 86, 455, 540, 24, LIGHT, 4)
@@ -596,14 +625,19 @@ class App:
         self.draw_board()
         self.draw_header()
         if self.menu:
-            self.draw_menu()
+            with self.shifted((self.width - W) / 2, (self.height - H) / 2):
+                self.draw_menu()
         else:
-            self.draw_players()
-            self.draw_actions()
-            self.draw_hand()
-            self.draw_log()
+            with self.shifted(self.width - W):
+                self.draw_players()
+                self.draw_actions()
+            with self.shifted(y=self.height - H):
+                self.draw_hand()
+            with self.shifted(self.width - W, self.height - H):
+                self.draw_log()
         if self.modal:
-            self.draw_modal()
+            with self.shifted((self.width - W) / 2, (self.height - H) / 2):
+                self.draw_modal()
         if self.toast and pg.time.get_ticks() < self.toast_until:
             self.panel((300, 103, 820, 48), (81, 62, 44), 10, GOLD)
             self.wrap(self.toast, 317, 116, 786, 16, LIGHT, 1)
@@ -673,7 +707,9 @@ class App:
                         self.autosave()
                     self.running = False
                 elif event.type == pg.VIDEORESIZE:
-                    self.window = pg.display.set_mode((max(720, event.w), max(480, event.h)), pg.RESIZABLE)
+                    if not self.fullscreen:
+                        self.window = pg.display.set_mode((max(720, event.w), max(480, event.h)), pg.RESIZABLE)
+                    self.sync_canvas()
                 elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                     pos = self.mouse(event.pos)
                     handled = False
@@ -685,7 +721,9 @@ class App:
                     if not handled:
                         self.board_click(pos)
                 elif event.type == pg.KEYDOWN:
-                    if self.menu and self.edit_seed:
+                    if event.key == pg.K_F11 or (event.key == pg.K_f and event.mod & (pg.KMOD_CTRL | pg.KMOD_META)):
+                        self.toggle_fullscreen()
+                    elif self.menu and self.edit_seed:
                         if event.key == pg.K_BACKSPACE:
                             self.seed_text = self.seed_text[:-1]
                         elif event.key in (pg.K_RETURN, pg.K_ESCAPE):
@@ -697,6 +735,8 @@ class App:
                             self.modal = None
                         elif self.mode:
                             self.mode = None
+                        elif self.fullscreen:
+                            self.toggle_fullscreen()
                         else:
                             self.toggle_menu()
                     elif event.key == pg.K_l and not self.menu:
