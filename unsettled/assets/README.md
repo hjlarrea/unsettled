@@ -1,6 +1,15 @@
 # Terrain artwork
 
-`terrain.png` is original AI-generated gouache terrain art created for Unsettled
-using OpenAI image generation on 2026-11-01. It contains six equal panels:
-wood, brick, wheat / sheep, ore, desert. Runtime code crops each panel to a hex.
-No CATAN artwork, logos, or card illustrations are included.
+`terrain-classic.png` is the active terrain atlas. It contains original
+AI-generated watercolor-style art created for Unsettled using OpenAI image
+generation on 2026-11-01, guided by a user-supplied photo of physical game tiles.
+The photo served as a visual reference; it is not bundled with the game.
+
+Six equal square panels appear in this order: wood, brick, wheat / sheep, ore,
+desert. The runtime renderer scales each panel into an inset hexagon and adds
+sandy shoulders, leaving roads and pieces legible along the edges. Number tokens
+are drawn separately by Pygame.
+
+`terrain.png` preserves the original full-bleed gouache atlas from the first
+version. Both illustrations were generated for this project. No official CATAN
+artwork, logos, or card illustrations are bundled.
