@@ -221,3 +221,37 @@ def test_translated_controls_dispatch_at_visible_position(app):
     assert close.collidepoint(app.mouse(app.point(close.center)))
     callback()
     assert app.modal is None
+
+
+@pytest.mark.parametrize("value,occupied", [
+    (1, {(1, 1)}),
+    (2, {(0, 0), (2, 2)}),
+    (3, {(0, 0), (1, 1), (2, 2)}),
+    (4, {(0, 0), (2, 0), (0, 2), (2, 2)}),
+    (5, {(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)}),
+    (6, {(0, 0), (2, 0), (0, 1), (2, 1), (0, 2), (2, 2)}),
+])
+def test_graphical_die_faces(app, value, occupied):
+    # Check actual visible pips, including empty positions, for every roll value.
+    app.canvas.fill((0, 0, 0))
+    app.draw_die(value, 100, 100)
+    for col, x in enumerate((.27, .5, .73)):
+        for row, y in enumerate((.24, .46, .68)):
+            pixel = app.canvas.get_at(app.point((100 + 40 * x, 100 + 40 * y)))[:3]
+            assert (pixel == (48, 55, 54)) == ((col, row) in occupied)
+
+
+def test_roll_display_uses_saved_results_without_changing_game(app, monkeypatch):
+    app.menu = False
+    app.game.dice = [2, 6]
+    before = app.game.to_dict()
+    shown = []
+    original = app.draw_die
+    def record(value, *args, **kwargs):
+        shown.append(value)
+        return original(value, *args, **kwargs)
+    monkeypatch.setattr(app, "draw_die", record)
+    app.render()
+    app.render()
+    assert shown == [2, 6, 2, 6]
+    assert app.game.to_dict() == before

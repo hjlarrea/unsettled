@@ -314,9 +314,7 @@ class App:
                 for j in range(dots):
                     self.circle((164, 66, 48) if n in (6, 8) else INK, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
         for edge, owner in g.roads.items():
-            a, b = [self.screen_point(v) for v in g.board.edges[edge]]
-            self.line(INK, a, b, 12)
-            self.line(COLORS[owner], a, b, 7)
+            self.draw_road(edge, owner)
         for v, (owner, size) in g.buildings.items():
             self.draw_piece(v, owner, size)
         cx, cy = self.hex_center(g.robber)
@@ -343,16 +341,100 @@ class App:
                     if i != g.robber:
                         self.polygon(GOLD, [self.screen_point(v) for v in g.board.hex_vertices[i]], 3)
 
+    @staticmethod
+    def piece_tone(owner, light=0):
+        color = COLORS[owner]
+        target = (255, 245, 221) if light > 0 else (28, 37, 40)
+        return tuple(round(c + (t - c) * abs(light)) for c, t in zip(color, target))
+
+    def draw_road(self, edge, owner):
+        """A small beveled wooden beam, seated along the tile seam."""
+        a, b = [self.screen_point(v) for v in self.game.board.edges[edge]]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dy)
+        nx, ny = -dy / length, dx / length
+        # Leave breathing room at intersections for the settlement pieces.
+        a = (a[0] + dx * .10, a[1] + dy * .10)
+        b = (b[0] - dx * .10, b[1] - dy * .10)
+        top = [(x + nx * side, y + ny * side)
+               for (x, y), side in ((a, -4), (b, -4), (b, 4), (a, 4))]
+        self.polygon((45, 47, 39), [(x + 1, y + 4) for x, y in top])
+        self.polygon(self.piece_tone(owner, -.44),
+                     [top[3], top[2], (top[2][0], top[2][1] + 3),
+                      (top[3][0], top[3][1] + 3)])
+        self.polygon(self.piece_tone(owner), top)
+        self.polygon(self.piece_tone(owner, -.35), top, 1)
+        self.line(self.piece_tone(owner, .48), top[0], top[1], 2)
+        self.line(self.piece_tone(owner, .18), a, b, 1)
+
     def draw_piece(self, v, owner, size):
         x, y = self.screen_point(v)
+        self.ellipse((48, 47, 37), (x - 15, y + 4, 31, 10))
+        base = self.piece_tone(owner)
+        shade = self.piece_tone(owner, -.32)
+        roof = self.piece_tone(owner, .28)
+        edge = self.piece_tone(owner, -.57)
+
+        def face(points, color):
+            points = [(x + px, y + py) for px, py in points]
+            self.polygon(color, points)
+            self.polygon(edge, points, 1)
+
         if size == 1:
-            shape = [(x - 10, y + 8), (x - 10, y - 4), (x, y - 13), (x + 10, y - 4), (x + 10, y + 8)]
+            # Front gable, visible side wall, and a sloping roof face.
+            face([(-10, 8), (-10, -3), (-2, -12), (7, -3), (7, 8)], base)
+            face([(7, 8), (12, 4), (12, -7), (7, -3)], shade)
+            face([(-2, -12), (3, -16), (12, -7), (7, -3)], roof)
+            self.line(self.piece_tone(owner, .62), (x - 10, y - 3), (x - 2, y - 12), 2)
+            self.panel((x - 4, y + 1, 5, 7), edge, 1)
+            self.line(self.piece_tone(owner, .36), (x - 8, y + 7), (x - 6, y + 7), 1)
         else:
-            shape = [(x - 15, y + 9), (x - 15, y - 5), (x - 8, y - 12), (x - 1, y - 5), (x - 1, y - 16), (x + 7, y - 21), (x + 15, y - 16), (x + 15, y + 9)]
-        self.polygon(INK, shape)
-        self.polygon(COLORS[owner], shape)
-        self.polygon(INK, shape, 2)
-        self.line((246, 228, 196), (x - 7, y + 5), (x + 5, y + 5), 2)
+            # A broad hall and taller keep distinguish cities at a glance.
+            face([(-15, 9), (-15, -4), (-8, -11), (-1, -4), (-1, 9)], base)
+            face([(-8, -11), (-4, -14), (3, -7), (-1, -4)], roof)
+            face([(-1, 9), (-1, -14), (6, -21), (13, -14), (13, 9)], base)
+            face([(13, 9), (17, 5), (17, -17), (13, -14)], shade)
+            face([(6, -21), (10, -24), (17, -17), (13, -14)], roof)
+            self.line(self.piece_tone(owner, .62), (x - 1, y - 14), (x + 6, y - 21), 2)
+            self.panel((x + 3, y + 1, 6, 8), edge, 1)
+            self.panel((x + 4, y - 11, 3, 5), edge, 1)
+            self.panel((x - 11, y + 1, 4, 5), edge, 1)
+        self.line(self.piece_tone(owner, .35), (x - 10, y + 9), (x + 10, y + 9), 1)
+
+    def draw_die(self, value, x, y, size=40):
+        """Draw a die at native resolution, including conventional pip positions."""
+        self.panel((x + 1, y + 4, size, size), (10, 23, 28), 8)
+        self.panel((x, y, size, size), (194, 177, 145), 8)
+        self.panel((x, y, size, size - 3), (246, 234, 207), 8)
+        self.line((255, 249, 231), (x + 9, y + 2), (x + size - 9, y + 2), 1)
+        if value is None:
+            self.line((156, 153, 138), (x + size * .4, y + size * .46),
+                      (x + size * .6, y + size * .46), 2)
+            return
+        pips = []
+        if value % 2:
+            pips.append((.5, .46))
+        if value >= 2:
+            pips.extend(((.27, .24), (.73, .68)))
+        if value >= 4:
+            pips.extend(((.73, .24), (.27, .68)))
+        if value == 6:
+            pips.extend(((.27, .46), (.73, .46)))
+        for px, py in pips:
+            self.circle((161, 148, 123), (x + size * px, y + size * py + 1), 3.5)
+            self.circle((48, 55, 54), (x + size * px, y + size * py), 3)
+
+    def draw_dice(self):
+        dice = self.game.dice
+        self.text("LAST ROLL", 50, 706, 12, GOLD, bold=True)
+        for i in range(2):
+            self.draw_die(dice[i] if dice else None, 50 + i * 49, 727)
+        if dice:
+            self.text(sum(dice), 160, 723, 34, LIGHT, serif=True)
+            self.text("total", 163, 761, 11, MUTED)
+        else:
+            self.text("Awaiting", 160, 735, 13, MUTED)
+            self.text("first roll", 160, 752, 13, MUTED)
 
     def active_mode(self):
         return {"setup_settlement": "settlement", "setup_road": "road", "road_building": "road"}.get(self.game.phase, self.mode)
@@ -435,8 +517,7 @@ class App:
             elif g.phase == "road_building":
                 self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"))
         with self.shifted(-(self.width - W) / 2, self.height - H):
-            if g.dice:
-                self.text(f"LAST ROLL   {g.dice[0]} + {g.dice[1]} = {sum(g.dice)}", 50, 751, 16, GOLD, bold=True)
+            self.draw_dice()
             self.text(f"TURN {g.turn + 1}", 910, 751, 14, MUTED)
 
     def resource_icon(self, r, x, y):

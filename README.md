@@ -10,7 +10,9 @@ while playing.
 
 The dark tabletop uses illustrated woodland, terracotta quarries, golden fields,
 green pastures, lavender mountains, and sandy tile borders, surrounded by a
-light-blue hexagonal sea. Text renders at the window's native resolution.
+light-blue hexagonal sea. Beveled roads and faceted settlements and cities give
+the board a painted wooden-piece feel. Text renders at the window's native
+resolution.
 
 ## Set up on macOS
 
@@ -63,6 +65,8 @@ Click **Set sail** to start.
   resources. The starting player is chosen randomly.
 - On your turn, **Roll dice**, then build, trade, play a development card, or
   **End turn**. An eligible development card can also be played before rolling.
+- The last roll appears as two graphical dice with pips and their total,
+  for both your rolls and opponents’ rolls.
 - Click **Road**, **Settlement**, or **City**, then click a highlighted location.
   Disabled buttons indicate insufficient resources or no legal placement.
 - **Bank / ports** automatically uses your best available exchange rate.
