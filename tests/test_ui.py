@@ -1,0 +1,124 @@
+"""Real Pygame rendering/input paths under SDL's offscreen driver."""
+import os
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+os.environ["SDL_AUDIODRIVER"] = "dummy"
+import pygame as pg
+import pytest
+from unsettled.ui import App
+from unsettled.engine import Game
+from unsettled import bots
+
+
+@pytest.fixture
+def app(monkeypatch, tmp_path):
+    monkeypatch.setattr("unsettled.persistence.save_dir", lambda: tmp_path)
+    a = App(seed=1)
+    yield a
+    pg.quit()
+
+
+def test_menu_new_game_and_resizing_coordinates(app):
+    app.render()
+    assert len(app.buttons) > 5
+    app.bot_count = 2
+    app.difficulties = ["Easy", "Standard", "Standard"]
+    app.new_game()
+    assert not app.menu
+    assert len(app.game.players) == 3
+    assert app.game.players[1].difficulty == "Easy"
+    assert app.game.players[2].difficulty == "Standard"
+    app.render()
+    for size in ((720, 480), (1200, 800), (1440, 960)):
+        app.window = pg.display.set_mode(size)
+        scale = min(size[0] / 1440, size[1] / 960)
+        point = (520 * scale + (size[0] - 1440 * scale) / 2, 424 * scale + (size[1] - 960 * scale) / 2)
+        assert app.mouse(point) == pytest.approx((520, 424))
+
+
+def test_board_click_setup(app):
+    app.menu = False
+    g = app.game
+    g.current = g.setup_order[0] = g.setup_order[-1] = 0
+    # Preserve a valid snake order with the human first.
+    g.setup_order = [0, 1, 2, 3, 3, 2, 1, 0]
+    v = g.settlement_sites(0, True)[0]
+    app.board_click(app.screen_point(v))
+    assert g.buildings[v] == [0, 1]
+    assert g.phase == "setup_road"
+    e = g.road_sites(0, v)[0]
+    a, b = [app.screen_point(v) for v in g.board.edges[e]]
+    app.board_click(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+    assert g.roads[e] == 0
+
+
+def test_bot_offers_always_pause_for_human(app):
+    app.menu = False
+    g = app.game
+    g.phase, g.current, g.turn = "main", 1, 5
+    g.players[1].hand["wood"] = 2
+    g.bank["wood"] -= 2
+    g.command(1, "offer", target=0, give={"wood": 1}, want={"ore": 1})
+    before = g.to_dict()
+    for _ in range(5):
+        app.update()
+    assert g.to_dict() == before
+    assert app.modal["kind"] == "trade"
+    app.render()
+    assert app.act("respond", accept=False)
+    assert g.phase == "main"
+    assert app.modal is None
+
+
+def test_resource_controls_and_trade_errors(app):
+    app.menu = False
+    app.game.current = 0
+    app.game.phase = "main"
+    app.open_modal("offer")
+    app.change("give", "wood", 1)
+    assert app.modal["give"]["wood"] == 0
+    assert not app.act("offer", target=1, give={"wood": 1}, want={"ore": 1})
+    assert app.modal is not None
+    assert "cannot offer" in app.toast
+    for kind in ("offer", "bank", "discard", "plenty", "monopoly", "journal"):
+        app.open_modal(kind)
+        app.render()
+        assert app.buttons
+
+
+def test_manual_save_load_and_invalid_load_keep_game(app, tmp_path):
+    app.new_game()
+    app.manual_save()
+    old = app.game.to_dict()
+    app.game.note("This should disappear on load.")
+    app.load(True)
+    assert app.game.to_dict() == old
+    current = app.game
+    (tmp_path / "manual.json").write_text("not json")
+    app.load(True)
+    assert app.game is current
+    assert "Cannot load save" in app.toast
+
+
+@pytest.mark.parametrize("opponents", [2, 3])
+def test_full_game_through_ui_action_paths(app, monkeypatch, opponents):
+    app.game = Game(bots=opponents, seed=3)
+    app.menu = False
+    app.started = True
+    monkeypatch.setattr(app, "autosave", lambda: None)
+    rendered = set()
+    for _ in range(16000):
+        g = app.game
+        if g.phase not in rendered:
+            app.render()
+            rendered.add(g.phase)
+        if g.winner is not None:
+            break
+        if g.actor == 0:
+            action = bots.decision(g.observation(0), "Standard", g.bot_memory.setdefault("0", {}))
+            assert app.act(**action), (g.phase, action, app.toast)
+        else:
+            app.next_bot = 0
+            app.update()
+            assert not app.autosave_error, app.toast
+    assert app.game.winner is not None
+    assert {"setup_settlement", "setup_road", "roll", "main", "trade", "robber", "victim", "game_over"} <= rendered
