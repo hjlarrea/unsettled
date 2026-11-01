@@ -57,7 +57,9 @@ no separate SDL installation is needed on the tested machine.
 Choose **You + 2 bots** or **You + 3 bots**. Click an opponent's difficulty to
 switch between Easy and Standard. Choose the recommended board or a random
 island; clear the seed field to generate a new seed, or enter a number to repeat
-a board. The seed also fixes the starting player and initial shuffled deck.
+a board. The seed repeats the island layout; each new interactive game uses
+fresh randomness for dice, the starting player, thefts, and the shuffled deck.
+Saved games preserve their random state for exact continuation.
 Click **Set sail** to start.
 
 - During setup, click a highlighted intersection, then a highlighted edge.

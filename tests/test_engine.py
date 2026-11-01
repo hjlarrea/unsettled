@@ -426,3 +426,16 @@ def test_structurally_invalid_saves_are_clear_errors(tmp_path, mutate):
     path.write_text(json.dumps(data))
     with pytest.raises(RuleError, match="Cannot load save"):
         persistence.load(path)
+
+
+def test_separate_play_seed_preserves_board_and_saved_random_sequence():
+    a = Game(seed=1, play_seed=9876)
+    b = Game(seed=1, play_seed=5432)
+    assert a.board == b.board
+    assert a.rng.getstate() != b.rng.getstate()
+    loaded = Game.from_dict(json.loads(json.dumps(a.to_dict())))
+    for game in (a, loaded):
+        game.phase = "roll"
+        game.command(game.current, "roll")
+    assert a.to_dict() == loaded.to_dict()
+    assert Game(seed=1).to_dict() == Game(seed=1).to_dict()

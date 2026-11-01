@@ -37,7 +37,7 @@ class App:
         self.sync_canvas()
         self.clock = pg.time.Clock()
         self.fonts = {}
-        self.game = Game(bots=bots, seed=seed)
+        self.game = Game(bots=bots, seed=seed, play_seed=random.SystemRandom().getrandbits(128))
         self.menu = True
         self.started = False
         self.bot_count = bots
@@ -224,7 +224,8 @@ class App:
         except ValueError:
             self.notify("Enter a whole number for the island seed.")
             return
-        self.game = Game(self.bot_count, seed, self.recommended, self.difficulties[:self.bot_count])
+        self.game = Game(self.bot_count, seed, self.recommended, self.difficulties[:self.bot_count],
+                         play_seed=random.SystemRandom().getrandbits(128))
         self.menu = False
         self.started = True
         self.mode = self.modal = None
@@ -315,8 +316,6 @@ class App:
                     self.circle((164, 66, 48) if n in (6, 8) else INK, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
         for edge, owner in g.roads.items():
             self.draw_road(edge, owner)
-        for v, (owner, size) in g.buildings.items():
-            self.draw_piece(v, owner, size)
         cx, cy = self.hex_center(g.robber)
         cx += 35
         cy -= 21
@@ -340,6 +339,10 @@ class App:
                 for i in range(19):
                     if i != g.robber:
                         self.polygon(GOLD, [self.screen_point(v) for v in g.board.hex_vertices[i]], 3)
+
+        # Placed pieces sit above tile seams and all placement guides.
+        for v, (owner, size) in g.buildings.items():
+            self.draw_piece(v, owner, size)
 
     @staticmethod
     def piece_tone(owner, light=0):
@@ -369,7 +372,9 @@ class App:
 
     def draw_piece(self, v, owner, size):
         x, y = self.screen_point(v)
-        self.ellipse((48, 47, 37), (x - 15, y + 4, 31, 10))
+        self.ellipse((48, 47, 37), (x - 14, y - 5, 29, 18))
+        if size == 2:
+            y += 6
         base = self.piece_tone(owner)
         shade = self.piece_tone(owner, -.32)
         roof = self.piece_tone(owner, .28)
@@ -381,13 +386,16 @@ class App:
             self.polygon(edge, points, 1)
 
         if size == 1:
-            # Front gable, visible side wall, and a sloping roof face.
-            face([(-10, 8), (-10, -3), (-2, -12), (7, -3), (7, 8)], base)
-            face([(7, 8), (12, 4), (12, -7), (7, -3)], shade)
-            face([(-2, -12), (3, -16), (12, -7), (7, -3)], roof)
-            self.line(self.piece_tone(owner, .62), (x - 10, y - 3), (x - 2, y - 12), 2)
-            self.panel((x - 4, y + 1, 5, 7), edge, 1)
-            self.line(self.piece_tone(owner, .36), (x - 8, y + 7), (x - 6, y + 7), 1)
+            # Overhead carved-house token: its roof footprint is centered on
+            # the intersection rather than placing a facade below the seams.
+            face([(-12, -5), (-3, 11), (13, 5), (13, 8), (-3, 14), (-12, -2)], shade)
+            face([(-12, -5), (-4, -8), (5, 8), (-3, 11)], roof)
+            face([(-4, -8), (4, -11), (13, 5), (5, 8)], base)
+            self.line(self.piece_tone(owner, .60), (x - 4, y - 8), (x + 5, y + 8), 2)
+            self.line(self.piece_tone(owner, .38), (x - 11, y - 5), (x - 3, y + 10), 1)
+            # A raised chimney keeps the overhead roof readable as a house.
+            face([(-7, -2), (-3, -4), (-3, 1), (-7, 3)], shade)
+            face([(-7, -2), (-3, -4), (-1, -2), (-5, 0)], self.piece_tone(owner, .55))
         else:
             # A broad hall and taller keep distinguish cities at a glance.
             face([(-15, 9), (-15, -4), (-8, -11), (-1, -4), (-1, 9)], base)
@@ -399,7 +407,7 @@ class App:
             self.panel((x + 3, y + 1, 6, 8), edge, 1)
             self.panel((x + 4, y - 11, 3, 5), edge, 1)
             self.panel((x - 11, y + 1, 4, 5), edge, 1)
-        self.line(self.piece_tone(owner, .35), (x - 10, y + 9), (x + 10, y + 9), 1)
+            self.line(self.piece_tone(owner, .35), (x - 10, y + 9), (x + 10, y + 9), 1)
 
     def draw_die(self, value, x, y, size=40):
         """Draw a die at native resolution, including conventional pip positions."""

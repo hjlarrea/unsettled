@@ -255,3 +255,42 @@ def test_roll_display_uses_saved_results_without_changing_game(app, monkeypatch)
     app.render()
     assert shown == [2, 6, 2, 6]
     assert app.game.to_dict() == before
+
+
+def test_new_games_repeat_island_without_repeating_first_roll(app, monkeypatch):
+    # Supply distinct entropy deterministically, avoiding probabilistic tests.
+    seeds = iter((1, 2))
+    class Entropy:
+        def getrandbits(self, bits):
+            return next(seeds)
+    monkeypatch.setattr("unsettled.ui.random.SystemRandom", Entropy)
+    app.seed_text = "1"
+    boards, rolls = [], []
+    for _ in range(2):
+        app.new_game()
+        g = app.game
+        boards.append(g.board)
+        while g.phase != "roll":
+            bots.step(g)
+        g.command(g.current, "roll")
+        rolls.append(g.dice)
+    assert boards[0] == boards[1]
+    assert rolls == [[1, 6], [4, 4]]  # Seven remains a valid first roll.
+
+
+def test_settlement_covers_intersection_and_road_guides(app):
+    app.menu = False
+    g = app.game
+    g.current = 0
+    g.setup_order = [0, 1, 2, 3, 3, 2, 1, 0]
+    vertex = g.settlement_sites(0, True)[0]
+    app.board_click(app.screen_point(vertex))
+    assert g.phase == "setup_road"
+    app.render()
+    center = app.point(app.screen_point(vertex))
+    actual = app.canvas.get_at(center)
+    app.canvas.fill((0, 0, 0))
+    app.draw_piece(vertex, 0, 1)
+    expected = app.canvas.get_at(center)
+    assert expected[:3] != (0, 0, 0)
+    assert actual == expected

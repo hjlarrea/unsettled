@@ -88,11 +88,13 @@ class Player:
 
 
 class Game:
-    def __init__(self, bots: int = 3, seed: int = 1, recommended: bool = False, difficulties: list[str] | None = None):
+    def __init__(self, bots: int = 3, seed: int = 1, recommended: bool = False, difficulties: list[str] | None = None, *, play_seed: int | None = None):
         if bots not in (2, 3):
             raise RuleError("Choose two or three opponents.")
         self.seed = seed
-        self.rng = random.Random(seed)
+        # Simulations remain reproducible by default; interactive games can
+        # keep an island layout while supplying fresh gameplay randomness.
+        self.rng = random.Random(seed if play_seed is None else play_seed)
         self.board = Board.create(seed, recommended)
         self.players = [Player("You", "Human")] + [Player(n, (difficulties or ["Standard"] * bots)[i]) for i, n in enumerate(("Juniper", "Flint", "Marina")[:bots])]
         self.bank = dict.fromkeys(RESOURCES, 19)
