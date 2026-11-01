@@ -9,12 +9,22 @@ from .engine import Game, RuleError, RESOURCES, COSTS
 from . import bots, persistence
 
 W, H = 1440, 960
-INK = (18, 38, 46)
-PANEL = (24, 46, 53)
-LIGHT = (244, 235, 214)
-MUTED = (162, 185, 181)
-GOLD = (222, 180, 105)
-COLORS = [(232, 137, 99), (113, 184, 165), (189, 163, 223), (111, 171, 210)]
+# Daylight palette: warm paper, sea glass, and deep teal for readable controls.
+BACKGROUND = (245, 242, 232)
+PANEL = (255, 253, 247)
+TEXT = (39, 57, 61)
+MUTED = (87, 105, 104)
+ACCENT = (38, 105, 99)
+WHITE = (255, 253, 247)
+BORDER = (207, 217, 205)
+BUTTON = (231, 238, 227)
+HOVER = (216, 232, 219)
+DISABLED = (236, 236, 227)
+DISABLED_TEXT = (117, 125, 117)
+SEA = (194, 224, 216)
+SEA_LINE = (145, 189, 179)
+HIGHLIGHT = (244, 194, 100)
+COLORS = [(195, 90, 58), (41, 122, 104), (127, 89, 163), (47, 117, 165)]
 TERRAIN = [(46, 108, 77), (164, 88, 62), (190, 156, 74), (111, 149, 84), (112, 126, 133), (206, 179, 127)]
 TILE_ORDER = ["wood", "brick", "wheat", "sheep", "ore", "desert"]
 CARD_NAMES = dict(knight="Knight", roads="Road Building", plenty="Year of Plenty", monopoly="Monopoly", victory="Victory Point")
@@ -57,7 +67,7 @@ class App:
             self.fonts[key] = pg.font.SysFont("Georgia" if serif else "Helvetica", size, bold=bold)
         return self.fonts[key]
 
-    def text(self, text, x, y, size=20, color=LIGHT, serif=False, bold=False, center=False):
+    def text(self, text, x, y, size=20, color=TEXT, serif=False, bold=False, center=False):
         surface = self.font(size, serif, bold).render(str(text), True, color)
         self.canvas.blit(surface, surface.get_rect(center=(x, y)) if center else (x, y))
 
@@ -85,12 +95,12 @@ class App:
         rect = pg.Rect(rect)
         mouse = self.mouse()
         hover = rect.collidepoint(mouse)
-        color = GOLD if accent else (49, 77, 83) if hover and active else (34, 61, 68)
+        color = ACCENT if accent else HOVER if hover and active else BUTTON
         if not active:
-            color = (28, 46, 52)
-        self.panel(rect, color, radius=8, border=(GOLD if hover and active else None))
+            color = DISABLED
+        self.panel(rect, color, radius=8, border=(ACCENT if hover and active else BORDER))
         self.text(label, rect.centerx, rect.centery, 16 if small else 19,
-                  INK if accent else LIGHT if active else (91, 116, 119), bold=accent, center=True)
+                  WHITE if active and accent else TEXT if active else DISABLED_TEXT, bold=accent, center=True)
         if active:
             self.buttons.append((rect, callback))
 
@@ -199,8 +209,8 @@ class App:
     def draw_board(self):
         g = self.game
         # Layered coast and subtle wave strokes behind the illustrated terrain.
-        pg.draw.ellipse(self.canvas, (27, 65, 74), (108, 66, 824, 722))
-        pg.draw.ellipse(self.canvas, (36, 81, 87), (143, 95, 755, 657), 2)
+        pg.draw.ellipse(self.canvas, SEA, (108, 66, 824, 722))
+        pg.draw.ellipse(self.canvas, SEA_LINE, (143, 95, 755, 657), 2)
         for i in range(19):
             cx, cy = self.hex_center(i)
             points = [self.screen_point(v) for v in g.board.hex_vertices[i]]
@@ -214,23 +224,23 @@ class App:
             length = math.hypot(dx, dy)
             x, y = mid[0] + dx / length * 41, mid[1] + dy / length * 41
             for end in (a, b):
-                pg.draw.line(self.canvas, (151, 153, 122), end, (x, y), 2)
-            self.panel((x - 34, y - 14, 68, 29), INK, 7, (105, 137, 136))
-            self.text("3:1" if kind == "any" else kind[:2].upper() + " 2:1", x, y + 1, 14, GOLD, center=True)
+                pg.draw.line(self.canvas, (132, 161, 143), end, (x, y), 2)
+            self.panel((x - 34, y - 14, 68, 29), PANEL, 7, SEA_LINE)
+            self.text("3:1" if kind == "any" else kind[:2].upper() + " 2:1", x, y + 1, 14, ACCENT, center=True)
         for i, tile in enumerate(g.board.hexes):
             cx, cy = self.hex_center(i)
             n = tile["number"]
             if n:
-                pg.draw.circle(self.canvas, (36, 44, 39), (cx + 1, cy + 3), 25)
-                pg.draw.circle(self.canvas, (244, 227, 187), (cx, cy), 24)
+                pg.draw.circle(self.canvas, (139, 147, 126), (cx + 1, cy + 3), 25)
+                pg.draw.circle(self.canvas, (255, 245, 218), (cx, cy), 24)
                 pg.draw.circle(self.canvas, (180, 153, 107), (cx, cy), 24, 2)
-                self.text(n, cx, cy - 3, 27, (164, 66, 48) if n in (6, 8) else INK, bold=True, center=True)
+                self.text(n, cx, cy - 3, 27, (164, 66, 48) if n in (6, 8) else TEXT, bold=True, center=True)
                 dots = 6 - abs(7 - n)
                 for j in range(dots):
-                    pg.draw.circle(self.canvas, (164, 66, 48) if n in (6, 8) else INK, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
+                    pg.draw.circle(self.canvas, (164, 66, 48) if n in (6, 8) else TEXT, (cx + int((j - (dots - 1) / 2) * 5), cy + 14), 1)
         for edge, owner in g.roads.items():
             a, b = [self.screen_point(v) for v in g.board.edges[edge]]
-            pg.draw.line(self.canvas, INK, a, b, 12)
+            pg.draw.line(self.canvas, TEXT, a, b, 12)
             pg.draw.line(self.canvas, COLORS[owner], a, b, 7)
         for v, (owner, size) in g.buildings.items():
             self.draw_piece(v, owner, size)
@@ -243,20 +253,26 @@ class App:
         pg.draw.circle(self.canvas, (137, 148, 145), (cx - 2, cy - 14), 2)
         if not self.menu and g.actor == 0 and g.phase != "game_over":
             mode = self.active_mode()
-            pulse = 4 + int(math.sin(pg.time.get_ticks() / 230) * 2)
             if mode in ("settlement", "city"):
                 sites = g.city_sites(0) if mode == "city" else g.settlement_sites(0, g.phase == "setup_settlement")
                 for v in sites:
-                    pg.draw.circle(self.canvas, LIGHT, self.screen_point(v), 10, 2)
-                    pg.draw.circle(self.canvas, GOLD, self.screen_point(v), pulse)
+                    point = self.screen_point(v)
+                    focused = math.dist(self.mouse(), point) < 25
+                    radius = 11 if focused else 7
+                    pg.draw.circle(self.canvas, WHITE, point, radius)
+                    pg.draw.circle(self.canvas, ACCENT, point, radius, 2 if focused else 1)
+                    pg.draw.circle(self.canvas, HIGHLIGHT, point, 5 if focused else 3)
             elif mode == "road":
                 for e in g.road_sites(0, g.setup_vertex if g.phase == "setup_road" else None):
                     a, b = [self.screen_point(v) for v in g.board.edges[e]]
-                    pg.draw.line(self.canvas, GOLD, a, b, 4)
+                    pg.draw.line(self.canvas, WHITE, a, b, 8)
+                    pg.draw.line(self.canvas, ACCENT, a, b, 4)
             elif g.phase == "robber":
                 for i in range(19):
                     if i != g.robber:
-                        pg.draw.polygon(self.canvas, GOLD, [self.screen_point(v) for v in g.board.hex_vertices[i]], 3)
+                        points = [self.screen_point(v) for v in g.board.hex_vertices[i]]
+                        pg.draw.polygon(self.canvas, WHITE, points, 5)
+                        pg.draw.polygon(self.canvas, ACCENT, points, 2)
 
     def draw_piece(self, v, owner, size):
         x, y = self.screen_point(v)
@@ -264,9 +280,9 @@ class App:
             shape = [(x - 10, y + 8), (x - 10, y - 4), (x, y - 13), (x + 10, y - 4), (x + 10, y + 8)]
         else:
             shape = [(x - 15, y + 9), (x - 15, y - 5), (x - 8, y - 12), (x - 1, y - 5), (x - 1, y - 16), (x + 7, y - 21), (x + 15, y - 16), (x + 15, y + 9)]
-        pg.draw.polygon(self.canvas, INK, shape)
+        pg.draw.polygon(self.canvas, TEXT, shape)
         pg.draw.polygon(self.canvas, COLORS[owner], shape)
-        pg.draw.polygon(self.canvas, INK, shape, 2)
+        pg.draw.polygon(self.canvas, TEXT, shape, 2)
         pg.draw.line(self.canvas, (246, 228, 196), (x - 7, y + 5), (x + 5, y + 5), 2)
 
     def active_mode(self):
@@ -276,15 +292,15 @@ class App:
         self.mode = mode
 
     def draw_header(self):
-        self.text("UNSETTLED", 40, 21, 38, LIGHT, serif=True)
-        self.text("AN ISLAND OF YOUR OWN", 43, 65, 12, GOLD, bold=True)
+        self.text("UNSETTLED", 40, 21, 38, TEXT, serif=True)
+        self.text("AN ISLAND OF YOUR OWN", 43, 65, 12, ACCENT, bold=True)
         if not self.menu:
             self.button("Save", (942, 27, 78, 38), self.manual_save, small=True)
             self.button("Load", (1030, 27, 78, 38), lambda: self.load(True), small=True)
             self.button(["Slow", "Normal", "Fast"][self.speed], (1118, 27, 92, 38), self.cycle_speed, small=True)
             self.button("Menu", (1220, 27, 90, 38), self.toggle_menu, small=True)
             self.text(f"Island {self.game.seed}", 1329, 80, 12, MUTED, center=True)
-        pg.draw.line(self.canvas, (57, 83, 85), (40, 97), (1400, 97))
+        pg.draw.line(self.canvas, BORDER, (40, 97), (1400, 97))
 
     def cycle_speed(self):
         self.speed = (self.speed + 1) % 3
@@ -293,20 +309,20 @@ class App:
         g = self.game
         for i, p in enumerate(g.players):
             y = 117 + i * 66
-            self.panel((1045, y, 355, 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
+            self.panel((1045, y, 355, 58), (232, 238, 216) if i == g.current else PANEL, 10, ACCENT if i == g.current else BORDER)
             pg.draw.circle(self.canvas, COLORS[i], (1065, y + 20), 5)
-            self.text(p.name, 1080, y + 9, 20, LIGHT, bold=True)
+            self.text(p.name, 1080, y + 9, 20, TEXT, bold=True)
             points = g.points(i, i == 0 or g.winner is not None)
-            self.text(f"{points} VP", 1340, y + 9, 20, GOLD, bold=True)
+            self.text(f"{points} VP", 1340, y + 9, 20, ACCENT, bold=True)
             detail = f"{sum(p.hand.values())} resources   {len(p.cards)} cards   {p.knights} knights"
             self.text(detail, 1080, y + 35, 13, MUTED)
             badges = ("R" if g.longest == i else "") + ("A" if g.army == i else "")
             if badges:
-                self.text(badges, 1360, y + 35, 13, GOLD)
+                self.text(badges, 1360, y + 35, 13, ACCENT)
 
     def draw_actions(self):
         g = self.game
-        self.text("YOUR NEXT MOVE" if g.actor == 0 else "AT THE TABLE", 1060, 399, 13, GOLD, bold=True)
+        self.text("YOUR NEXT MOVE" if g.actor == 0 else "AT THE TABLE", 1060, 399, 13, ACCENT, bold=True)
         human = g.actor == 0
         explanations = {
             "setup_settlement": "Choose a highlighted intersection for your settlement.",
@@ -323,7 +339,7 @@ class App:
             "game_over": f"{g.players[g.winner if g.winner is not None else 0].name} wins! Start another island from the menu.",
         }
         message = explanations[g.phase] if human or g.phase == "game_over" else f"{g.players[g.actor].name} is considering their move…"
-        self.wrap(message, 1060, 427, 320, 19, LIGHT, 3)
+        self.wrap(message, 1060, 427, 320, 19, TEXT, 3)
         y = 510
         if g.phase == "game_over":
             self.button("Back to menu", (1060, y, 320, 44), self.toggle_menu, accent=True)
@@ -348,28 +364,28 @@ class App:
             elif g.phase == "road_building":
                 self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"))
         if g.dice:
-            self.text(f"LAST ROLL   {g.dice[0]} + {g.dice[1]} = {sum(g.dice)}", 50, 751, 16, GOLD, bold=True)
+            self.text(f"LAST ROLL   {g.dice[0]} + {g.dice[1]} = {sum(g.dice)}", 50, 751, 16, ACCENT, bold=True)
         self.text(f"TURN {g.turn + 1}", 910, 751, 14, MUTED)
 
     def resource_icon(self, r, x, y):
-        color = TERRAIN[TILE_ORDER.index(r)]
+        color = {"wood": (46, 108, 77), "brick": (164, 88, 62), "wheat": (139, 106, 32), "sheep": (85, 119, 57), "ore": (87, 107, 120)}[r]
         pg.draw.circle(self.canvas, color, (x, y), 13)
         letter = {"wood": "W", "brick": "B", "wheat": "G", "sheep": "S", "ore": "O"}[r]
-        self.text(letter, x, y, 14, LIGHT, bold=True, center=True)
+        self.text(letter, x, y, 14, WHITE, bold=True, center=True)
 
     def draw_hand(self):
         g = self.game
-        self.text("YOUR RESOURCES", 45, 795, 13, GOLD, bold=True)
-        self.text("BUILDING COSTS", 1060, 805, 13, GOLD, bold=True)
+        self.text("YOUR RESOURCES", 45, 795, 13, ACCENT, bold=True)
+        self.text("BUILDING COSTS", 1060, 805, 13, ACCENT, bold=True)
         for i, (kind, cost) in enumerate(COSTS.items()):
-            self.text(kind.title(), 1060, 831 + i * 27, 15, LIGHT)
+            self.text(kind.title(), 1060, 831 + i * 27, 15, TEXT)
             self.text("  ".join(f"{n}{r[:2]}" for r, n in cost.items()), 1168, 831 + i * 27, 14, MUTED)
         for i, r in enumerate(RESOURCES):
             x = 44 + i * 195
-            self.panel((x, 818, 182, 65), (32, 56, 61), 10)
+            self.panel((x, 818, 182, 65), PANEL, 10, BORDER)
             self.resource_icon(r, x + 24, 844)
-            self.text(r.title(), x + 45, 829, 19, LIGHT)
-            self.text(g.players[0].hand[r], x + 154, 843, 29, GOLD, bold=True, center=True)
+            self.text(r.title(), x + 45, 829, 19, TEXT)
+            self.text(g.players[0].hand[r], x + 154, 843, 29, ACCENT, bold=True, center=True)
             self.text(f"Bank {g.bank[r]}  •  Port {g.ratio(0, r)}:1", x + 15, 861, 12, MUTED)
         counts = CounterCards(g.players[0].cards)
         x = 45
@@ -382,7 +398,7 @@ class App:
             x += width + 10
 
     def draw_log(self):
-        self.text("TABLE JOURNAL", 1060, 710, 13, GOLD, bold=True)
+        self.text("TABLE JOURNAL", 1060, 710, 13, ACCENT, bold=True)
         # Expanded journal opens on L; compact view keeps the board uncluttered.
         latest = self.game.log[-1]
         self.wrap(latest, 1060, 741, 320, 16, MUTED, 2)
@@ -390,23 +406,25 @@ class App:
 
     def draw_menu(self):
         shade = pg.Surface((W, H), pg.SRCALPHA)
-        shade.fill((11, 28, 35, 175))
+        shade.fill((*BACKGROUND, 231))
         self.canvas.blit(shade, (0, 98))
-        self.text("A little island.", 80, 270, 65, LIGHT, serif=True)
-        self.text("A whole evening.", 80, 345, 65, LIGHT, serif=True)
-        self.wrap("Gather. Trade. Build. Settle in for a game at your own pace, with a table that is always ready.", 86, 455, 540, 24, LIGHT, 4)
-        self.text("OFFLINE  /  NO TIMERS  /  JUST ONE MORE TURN", 86, 625, 14, GOLD, bold=True)
-        self.panel((830, 153, 550, 742), INK, 24, (77, 109, 111))
-        self.text("Your next island", 873, 188, 38, LIGHT, serif=True)
-        self.text("THE TABLE", 875, 255, 13, GOLD, bold=True)
+        self.text("A little island.", 80, 270, 65, TEXT, serif=True)
+        self.text("A whole evening.", 80, 345, 65, TEXT, serif=True)
+        self.wrap("Gather. Trade. Build. Settle in for a game at your own pace, with a table that is always ready.", 86, 455, 540, 24, TEXT, 4)
+        self.text("OFFLINE  /  NO TIMERS  /  JUST ONE MORE TURN", 86, 625, 14, ACCENT, bold=True)
+        self.panel((830, 157, 550, 742), (224, 226, 212), 24)
+        self.panel((830, 153, 550, 742), PANEL, 24, BORDER)
+        self.text("Your next island", 873, 188, 38, TEXT, serif=True)
+        self.text("THE TABLE", 875, 255, 13, ACCENT, bold=True)
         for i, count in enumerate((2, 3)):
             self.button(f"You + {count} bots", (875 + i * 224, 281, 210, 44), lambda c=count: setattr(self, "bot_count", c), accent=self.bot_count == count)
-        self.text("OPPONENTS", 875, 350, 13, GOLD, bold=True)
+        self.text("OPPONENTS", 875, 350, 13, ACCENT, bold=True)
         for i in range(self.bot_count):
             y = 379 + i * 51
-            self.text(("Juniper", "Flint", "Marina")[i], 875, y + 9, 20, COLORS[i + 1])
+            pg.draw.circle(self.canvas, COLORS[i + 1], (881, y + 21), 5)
+            self.text(("Juniper", "Flint", "Marina")[i], 898, y + 9, 20, TEXT)
             self.button(self.difficulties[i], (1135, y, 175, 39), lambda j=i: self.toggle_difficulty(j), small=True)
-        self.text("BOARD", 875, 557, 13, GOLD, bold=True)
+        self.text("BOARD", 875, 557, 13, ACCENT, bold=True)
         self.button("Recommended" if self.recommended else "Random island", (875, 582, 435, 39), lambda: setattr(self, "recommended", not self.recommended))
         self.text("Island seed (blank = random)", 875, 639, 15, MUTED)
         self.button(self.seed_text + ("|" if self.edit_seed else ""), (1121, 632, 189, 34), lambda: setattr(self, "edit_seed", True), small=True)
@@ -441,14 +459,15 @@ class App:
     def draw_modal(self):
         m = self.modal
         shade = pg.Surface((W, H), pg.SRCALPHA)
-        shade.fill((6, 18, 24, 210))
+        shade.fill((*BACKGROUND, 204))
         self.canvas.blit(shade, (0, 0))
         # Remove underlying hit targets; modal owns input until dismissed.
         self.buttons = []
-        self.panel((365, 152, 710, 650), INK, 22, (105, 133, 131))
+        self.panel((365, 157, 710, 650), (210, 218, 204), 22)
+        self.panel((365, 152, 710, 650), PANEL, 22, BORDER)
         kind = m["kind"]
         titles = dict(bank="Trade with the bank", offer="Propose a trade", counter="Make a counteroffer", trade="At the trading table", discard="Return resources", plenty="Year of Plenty", monopoly="Monopoly", journal="Table journal")
-        self.text(titles[kind], 408, 183, 34, LIGHT, serif=True)
+        self.text(titles[kind], 408, 183, 34, TEXT, serif=True)
         self.button("×", (1001, 180, 37, 37), lambda: setattr(self, "modal", None))
         if kind == "journal":
             lines = []
@@ -470,10 +489,10 @@ class App:
         if kind == "trade":
             t = self.game.trade
             name = self.game.players[t["owner"]].name
-            self.text(f"{name} offers you", 410, 263, 22, GOLD)
-            self.wrap(self.bundle_label(t["give"]), 410, 305, 610, 26, LIGHT)
-            self.text("In exchange for", 410, 395, 22, GOLD)
-            self.wrap(self.bundle_label(t["want"]), 410, 437, 610, 26, LIGHT)
+            self.text(f"{name} offers you", 410, 263, 22, ACCENT)
+            self.wrap(self.bundle_label(t["give"]), 410, 305, 610, 26, TEXT)
+            self.text("In exchange for", 410, 395, 22, ACCENT)
+            self.wrap(self.bundle_label(t["want"]), 410, 437, 610, 26, TEXT)
             self.button("Accept trade", (410, 616, 290, 48), lambda: self.act("respond", accept=True), active=all(self.game.players[0].hand[r] >= n for r, n in t["want"].items()), accent=True)
             self.button("Decline", (724, 616, 300, 48), lambda: self.act("respond", accept=False))
             self.button("Counteroffer", (410, 685, 614, 42), lambda: self.open_modal("counter"), active=not t["countered"])
@@ -481,8 +500,8 @@ class App:
         if kind == "bank":
             give, receive = RESOURCES[m["give_r"]], RESOURCES[m["receive_r"]]
             ratio = self.game.ratio(0, give)
-            self.text("YOU GIVE", 410, 278, 15, GOLD, bold=True)
-            self.text("YOU RECEIVE", 740, 278, 15, GOLD, bold=True)
+            self.text("YOU GIVE", 410, 278, 15, ACCENT, bold=True)
+            self.text("YOU RECEIVE", 740, 278, 15, ACCENT, bold=True)
             for i, r in enumerate(RESOURCES):
                 y = 320 + i * 53
                 self.button(f"{ratio if r == give else self.game.ratio(0, r)} {r.title()}", (410, y, 282, 43), lambda j=i: m.update(give_r=j), accent=give == r)
@@ -494,19 +513,19 @@ class App:
         if trading:
             if kind == "offer":
                 self.button(f"With {self.game.players[m['target']].name}  ›", (410, 244, 612, 40), lambda: m.update(target=m["target"] % (len(self.game.players) - 1) + 1))
-            self.text("YOU GIVE", 582, 305, 14, GOLD, bold=True)
-            self.text("YOU REQUEST", 820, 305, 14, GOLD, bold=True)
+            self.text("YOU GIVE", 582, 305, 14, ACCENT, bold=True)
+            self.text("YOU REQUEST", 820, 305, 14, ACCENT, bold=True)
         else:
             count = self.game.discards.get(0, 0) if kind == "discard" else min(2, sum(self.game.bank.values())) if kind == "plenty" else 1
             self.text(f"Select exactly {count} {'resource type' if kind == 'monopoly' else 'cards'}.", 410, 263, 21, MUTED)
         for i, r in enumerate(RESOURCES):
             y = 350 + i * 59
             self.resource_icon(r, 423, y + 18)
-            self.text(r.title(), 448, y + 7, 20, LIGHT)
+            self.text(r.title(), 448, y + 7, 20, TEXT)
             for j, side in enumerate(("give", "want") if trading else ("give",)):
                 x = 580 + j * 240
                 self.button("−", (x, y, 38, 38), lambda s=side, r=r: self.change(s, r, -1))
-                self.text(m[side][r], x + 77, y + 19, 23, GOLD, center=True)
+                self.text(m[side][r], x + 77, y + 19, 23, ACCENT, center=True)
                 self.button("+", (x + 113, y, 38, 38), lambda s=side, r=r: self.change(s, r, 1))
             if not trading:
                 n = self.game.bank[r] if kind == "plenty" else self.game.players[0].hand[r]
@@ -528,12 +547,13 @@ class App:
 
     def render(self):
         self.buttons = []
-        self.canvas.fill(INK)
+        self.canvas.fill(BACKGROUND)
         self.draw_board()
         self.draw_header()
         if self.menu:
             self.draw_menu()
         else:
+            self.panel((1027, 109, 390, 831), (239, 239, 226), 20, BORDER)
             self.draw_players()
             self.draw_actions()
             self.draw_hand()
@@ -541,12 +561,12 @@ class App:
         if self.modal:
             self.draw_modal()
         if self.toast and pg.time.get_ticks() < self.toast_until:
-            self.panel((300, 103, 820, 48), (81, 62, 44), 10, GOLD)
-            self.wrap(self.toast, 317, 116, 786, 16, LIGHT, 1)
+            self.panel((300, 103, 820, 48), (255, 239, 200), 10, (174, 134, 63))
+            self.wrap(self.toast, 317, 116, 786, 16, TEXT, 1)
         width, height = self.window.get_size()
         scale = min(width / W, height / H)
         scaled = pg.transform.smoothscale(self.canvas, (round(W * scale), round(H * scale)))
-        self.window.fill((10, 23, 29))
+        self.window.fill(BACKGROUND)
         self.window.blit(scaled, ((width - scaled.get_width()) // 2, (height - scaled.get_height()) // 2))
         pg.display.flip()
 

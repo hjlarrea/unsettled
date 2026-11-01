@@ -8,6 +8,12 @@ while playing.
 
 ![The illustrated Unsettled board](docs/board.png)
 
+The `feat/daylight-theme` branch explores a softer daytime interface: warm paper
+backgrounds, seafoam water, cream panels, and teal controls. The original dark
+interface is preserved on `main`. Close the app before switching branches, then
+relaunch with `.venv/bin/python -m unsettled` to compare them. Existing saves
+work with either interface.
+
 ## Set up on macOS
 
 Install [pyenv](https://github.com/pyenv/pyenv#installation) if it is not already
