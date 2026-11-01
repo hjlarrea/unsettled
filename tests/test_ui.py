@@ -139,6 +139,10 @@ def test_native_rendering_and_input_survive_resize(app, monkeypatch, size):
     scale, viewport = app.viewport()
     assert app.canvas.get_size() == size
     assert viewport == pg.Rect(0, 0, *size)
+    # The whole sea frame clears the title bar and leaves room for the footer.
+    sea_y = [point[1] for point in app.water_outline()]
+    assert min(sea_y) > 97 + 20
+    assert max(sea_y) < app.height - 60
     # The sidebar follows the right edge at every aspect ratio.
     sidebar = app.rect((1045 + app.width - 1440, 117, 355, 58))
     assert app.canvas.get_at(sidebar.center)[:3] != (18, 38, 46)
@@ -173,11 +177,11 @@ def test_water_has_blue_hexagonal_outline(app):
     app.render()
     # Water reaches the six-sided frame's tips; its cutaway corners reveal the
     # surrounding tabletop rather than filling an oval or rectangle.
-    assert app.canvas.get_at((120, 424))[:3] == WATER
-    assert app.canvas.get_at((900, 424))[:3] == WATER
-    assert app.canvas.get_at((520, 80))[:3] == WATER
-    assert app.canvas.get_at((200, 200))[:3] == INK
-    assert app.canvas.get_at((840, 640))[:3] == INK
+    assert app.canvas.get_at((120, 490))[:3] == WATER
+    assert app.canvas.get_at((900, 490))[:3] == WATER
+    assert app.canvas.get_at((520, 146))[:3] == WATER
+    assert app.canvas.get_at((200, 266))[:3] == INK
+    assert app.canvas.get_at((840, 706))[:3] == INK
 
 
 def test_fullscreen_restores_window_and_preserves_game(app, monkeypatch):

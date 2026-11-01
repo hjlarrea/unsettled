@@ -89,10 +89,13 @@ Click **Set sail** to start.
 - **Full screen**, **F11**, or **Cmd+F** / **Ctrl+F** toggles full-screen mode.
   **Escape** returns to the window after closing any dialog or build tool.
   Resizing and full-screen mode use the entire window: controls anchor to the
-  right, resources to the bottom, and the board centers in the remaining area.
+  right, resource counters sit beneath your player details, and the board
+  centers below the title bar.
   Tiles keep their proportions and text stays sharp.
 
-Your resource cards and development-card identities remain private. Opponent
+Your resource counters appear inside your player panel on the right. Each shows
+your count, with the bank supply and port ratio underneath. Your resource cards
+and development-card identities remain private. Opponent
 hand sizes, development-card counts, played knights, and public victory points
 are visible. **R** and **A** mark Longest Road and Largest Army. Opponents' hidden
 Victory Point cards are revealed in their scores at game end. First to at least

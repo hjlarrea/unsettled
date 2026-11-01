@@ -242,11 +242,11 @@ class App:
     def screen_point(self, v):
         x, y = self.game.board.vertices[v]
         return (int(520 + (self.width - W) / 2 + x * 79),
-                int(424 + (self.height - H) / 2 + y * 79))
+                int(490 + (self.height - H) / 2 + y * 79))
 
     def hex_center(self, h):
         tile = self.game.board.hexes[h]
-        return (int(520 + (self.width - W) / 2 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(424 + (self.height - H) / 2 + 1.5 * tile["r"] * 79))
+        return (int(520 + (self.width - W) / 2 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(490 + (self.height - H) / 2 + 1.5 * tile["r"] * 79))
 
     def tile(self, resource):
         key = (resource, self.scale)
@@ -279,7 +279,7 @@ class App:
 
     def water_outline(self, radius=414):
         return [(520 + (self.width - W) / 2 + radius * math.cos(i * math.pi / 3),
-                 424 + (self.height - H) / 2 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
+                 490 + (self.height - H) / 2 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
 
     def draw_board(self):
         g = self.game
@@ -296,7 +296,7 @@ class App:
         for edge, kind in g.board.ports.items():
             a, b = [self.screen_point(v) for v in g.board.edges[edge]]
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-            dx, dy = mid[0] - 520 - (self.width - W) / 2, mid[1] - 424 - (self.height - H) / 2
+            dx, dy = mid[0] - 520 - (self.width - W) / 2, mid[1] - 490 - (self.height - H) / 2
             length = math.hypot(dx, dy)
             x, y = mid[0] + dx / length * 41, mid[1] + dy / length * 41
             for end in (a, b):
@@ -386,16 +386,13 @@ class App:
             self.polygon(edge, points, 1)
 
         if size == 1:
-            # Overhead carved-house token: its roof footprint is centered on
-            # the intersection rather than placing a facade below the seams.
-            face([(-12, -5), (-3, 11), (13, 5), (13, 8), (-3, 14), (-12, -2)], shade)
-            face([(-12, -5), (-4, -8), (5, 8), (-3, 11)], roof)
-            face([(-4, -8), (4, -11), (13, 5), (5, 8)], base)
-            self.line(self.piece_tone(owner, .60), (x - 4, y - 8), (x + 5, y + 8), 2)
-            self.line(self.piece_tone(owner, .38), (x - 11, y - 5), (x - 3, y + 10), 1)
-            # A raised chimney keeps the overhead roof readable as a house.
-            face([(-7, -2), (-3, -4), (-3, 1), (-7, 3)], shade)
-            face([(-7, -2), (-3, -4), (-1, -2), (-5, 0)], self.piece_tone(owner, .55))
+            # A compact 3D house, matching the city's painted wooden faces.
+            y += 3
+            face([(-10, 8), (-10, -3), (-2, -12), (7, -3), (7, 8)], base)
+            face([(7, 8), (12, 4), (12, -7), (7, -3)], shade)
+            face([(-2, -12), (3, -16), (12, -7), (7, -3)], roof)
+            self.line(self.piece_tone(owner, .62), (x - 10, y - 3), (x - 2, y - 12), 2)
+            self.panel((x - 4, y + 1, 5, 7), edge, 1)
         else:
             # A broad hall and taller keep distinguish cities at a glance.
             face([(-15, 9), (-15, -4), (-8, -11), (-1, -4), (-1, 9)], base)
@@ -469,8 +466,8 @@ class App:
     def draw_players(self):
         g = self.game
         for i, p in enumerate(g.players):
-            y = 117 + i * 66
-            self.panel((1045, y, 355, 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
+            y = 117 + i * 66 + (80 if i else 0)
+            self.panel((1045, y, 355, 138 if i == 0 else 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
             self.circle(COLORS[i], (1065, y + 20), 5)
             self.text(p.name, 1080, y + 9, 20, LIGHT, bold=True)
             points = g.points(i, i == 0 or g.winner is not None)
@@ -480,6 +477,14 @@ class App:
             badges = ("R" if g.longest == i else "") + ("A" if g.army == i else "")
             if badges:
                 self.text(badges, 1360, y + 35, 13, GOLD)
+
+        # Keep private resource counts beside your own public player details.
+        for i, r in enumerate(RESOURCES):
+            x = 1055 + i * 68
+            self.panel((x, 181, 64, 64), (32, 56, 61), 7)
+            self.text(r.title(), x + 32, 193, 12, LIGHT, center=True)
+            self.text(g.players[0].hand[r], x + 32, 216, 23, GOLD, bold=True, center=True)
+            self.text(f"{g.bank[r]} · {g.ratio(0, r)}:1", x + 32, 236, 11, MUTED, center=True)
 
     def draw_actions(self):
         g = self.game
@@ -524,9 +529,10 @@ class App:
                     self.button(g.players[victim].name, (1060, y + i * 44, 320, 37), lambda v=victim: self.act("steal", victim=v))
             elif g.phase == "road_building":
                 self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"))
-        with self.shifted(-(self.width - W) / 2, self.height - H):
-            self.draw_dice()
-            self.text(f"TURN {g.turn + 1}", 910, 751, 14, MUTED)
+
+    def draw_board_status(self):
+        self.draw_dice()
+        self.text(f"TURN {self.game.turn + 1}", 910, 837, 14, MUTED)
 
     def resource_icon(self, r, x, y):
         color = TERRAIN[TILE_ORDER.index(r)]
@@ -536,19 +542,12 @@ class App:
 
     def draw_hand(self):
         g = self.game
-        self.text("YOUR RESOURCES", 45, 795, 13, GOLD, bold=True)
         with self.shifted(self.width - W):
-            self.text("BUILDING COSTS", 1060, 805, 13, GOLD, bold=True)
+            self.text("BUILDING COSTS", 1060, 878, 13, GOLD, bold=True)
             for i, (kind, cost) in enumerate(COSTS.items()):
-                self.text(kind.title(), 1060, 831 + i * 27, 15, LIGHT)
-                self.text("  ".join(f"{n}{r[:2]}" for r, n in cost.items()), 1168, 831 + i * 27, 14, MUTED)
-        for i, r in enumerate(RESOURCES):
-            x = 44 + i * (195 + (self.width - W) / 4)
-            self.panel((x, 818, 182, 65), (32, 56, 61), 10)
-            self.resource_icon(r, x + 24, 844)
-            self.text(r.title(), x + 45, 829, 19, LIGHT)
-            self.text(g.players[0].hand[r], x + 154, 843, 29, GOLD, bold=True, center=True)
-            self.text(f"Bank {g.bank[r]}  •  Port {g.ratio(0, r)}:1", x + 15, 861, 12, MUTED)
+                x, y = 1060 + (i % 2) * 165, 899 + (i // 2) * 28
+                self.text(kind.title(), x, y, 13, LIGHT)
+                self.text("  ".join(f"{n}{r[:2]}" for r, n in cost.items()), x, y + 14, 12, MUTED)
         counts = CounterCards(g.players[0].cards)
         x = 45
         if not counts:
@@ -719,11 +718,15 @@ class App:
         else:
             with self.shifted(self.width - W):
                 self.draw_players()
-                self.draw_actions()
+                with self.shifted(y=80):
+                    self.draw_actions()
+            with self.shifted((self.width - W) / 2, self.height - H):
+                self.draw_board_status()
             with self.shifted(y=self.height - H):
                 self.draw_hand()
             with self.shifted(self.width - W, self.height - H):
-                self.draw_log()
+                with self.shifted(y=80):
+                    self.draw_log()
         if self.modal:
             with self.shifted((self.width - W) / 2, (self.height - H) / 2):
                 self.draw_modal()
