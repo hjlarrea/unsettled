@@ -105,6 +105,32 @@ are visible. **R** and **A** mark Longest Road and Largest Army. Opponents' hidd
 Victory Point cards are revealed in their scores at game end. First to at least
 10 points **on their own turn** wins.
 
+## Experimental 3D board
+
+The board includes a switchable perspective view.
+Choose **2D board** or **3D board** under **Board** in the menu. You can also
+click **View: Classic** above the board, or press **P**, to switch at any point
+in a game. The same game and legal placement rules apply in both views.
+- **Middle-button drag** orbits the board and changes its tilt.
+- **Shift + middle-button drag** pans the camera.
+- **Scroll wheel** zooms in and out over the board.
+- **Reset view** or **Home** restores the starting camera.
+- **Left click** still places pieces and selects the robber's destination.
+
+![The experimental perspective board](docs/perspective-board.png)
+
+This prototype uses software-rendered terrain in Pygame, combining illustrated
+ground with rounded, softly shaded forest canopies and sheep, continuous mountain
+ridges with snow and rock shading, layered clay hills, and rolling dunes.
+Buildings, crops, ports, and the thick board frame retain their 3D geometry.
+Number tokens and port labels face the screen for readability. The interface
+stays fixed while the board moves, and dialogs pause camera controls. Camera
+settings are temporary and do not affect saves. The classic view retains its
+illustrated terrain, which is also projected onto the 3D board. Static scenery
+and projected ground textures are cached to keep normal play responsive.
+Complex overlapping geometry uses depth sorting rather than a GPU depth buffer,
+so this is a visual and interaction prototype rather than a finished 3D renderer.
+
 ## Saves
 
 The game autosaves after every completed action and when you close an active

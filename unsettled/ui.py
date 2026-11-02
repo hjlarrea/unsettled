@@ -9,6 +9,7 @@ from pathlib import Path
 import pygame as pg
 from .engine import Game, RuleError, RESOURCES, COSTS
 from . import bots, persistence
+from .perspective import Camera, Scene
 
 W, H = 1440, 960
 INK = (18, 38, 46)
@@ -26,7 +27,7 @@ CARD_NAMES = dict(knight="Knight", roads="Road Building", plenty="Year of Plenty
 
 
 class App:
-    def __init__(self, seed=1, bots=3):
+    def __init__(self, seed=1, bots=3, perspective=False):
         pg.init()
         pg.display.set_caption("Unsettled • An island of your own")
         self.window = pg.display.set_mode((1280, 854), pg.RESIZABLE)
@@ -58,6 +59,10 @@ class App:
         self.toast_until = 0
         self.next_bot = 0
         self.running = True
+        self.perspective = perspective
+        self.camera = Camera()
+        self.scene = Scene()
+        self.camera_drag = None
         self.tile_cache = {}
         self.last_action = 0
         self.autosave_error = False
@@ -347,12 +352,122 @@ class App:
 
     def screen_point(self, v):
         x, y = self.game.board.vertices[v]
+        if self.perspective:
+            return self.project_world((x * 79, y * 79, 0))
         return (int(520 + (self.width - W) / 2 + x * 79),
                 int(490 + (self.height - H) / 2 + y * 79))
 
     def hex_center(self, h):
         tile = self.game.board.hexes[h]
+        if self.perspective:
+            return self.project_world((*self.scene.center(tile), 0))
         return (int(520 + (self.width - W) / 2 + math.sqrt(3) * (tile["q"] + tile["r"] / 2) * 79), int(490 + (self.height - H) / 2 + 1.5 * tile["r"] * 79))
+
+    def camera_center(self):
+        return (520 + (self.width - W) / 2, 460 + (self.height - H) / 2)
+
+    def project_world(self, point):
+        x, y, _ = self.camera.project(point, self.camera_center())
+        return (x, y)
+
+    def board_viewport(self):
+        return pg.Rect(20, 105, self.width - 460, self.height - 220)
+
+    def set_perspective(self, enabled):
+        self.perspective = enabled
+        self.camera_drag = None
+
+    def toggle_perspective(self):
+        self.set_perspective(not self.perspective)
+
+    def reset_camera(self):
+        self.camera = Camera()
+        self.camera_drag = None
+
+    def draw_view_controls(self):
+        self.button("View: 3D" if self.perspective else "View: Classic", (40, 110, 140, 30),
+                    self.toggle_perspective, small=True,
+                    tooltip="Switch between the classic board and the 3D experiment. Shortcut: P.")
+        if self.perspective:
+            self.button("Reset view", (190, 110, 108, 30), self.reset_camera, small=True,
+                        tooltip="Reset rotation, pan, and zoom. Shortcut: Home.")
+            self.text("Middle drag: orbit  /  Shift: pan  /  Scroll: zoom", 40, 149, 12, MUTED)
+
+    def camera_event(self, event):
+        # Always release a drag, including when a dialog opened while dragging.
+        if event.type == pg.MOUSEBUTTONUP and event.button == 2:
+            dragging = self.camera_drag is not None
+            self.camera_drag = None
+            return dragging
+        if self.menu or self.modal:
+            self.camera_drag = None
+            return False
+        if event.type == pg.KEYDOWN:
+            if event.key == pg.K_p:
+                self.toggle_perspective()
+                return True
+            if event.key == pg.K_HOME and self.perspective:
+                self.reset_camera()
+                return True
+        if not self.perspective:
+            return False
+        if event.type == pg.MOUSEMOTION and self.camera_drag is not None:
+            dx, dy = (delta / self.scale for delta in event.rel)
+            dx = -dx
+            if self.camera_drag == "pan":
+                self.camera.pan[0] = max(-550, min(550, self.camera.pan[0] + dx))
+                self.camera.pan[1] = max(-350, min(350, self.camera.pan[1] + dy))
+            else:
+                self.camera.orbit(dx, dy)
+            return True
+        if event.type not in (pg.MOUSEBUTTONDOWN, pg.MOUSEWHEEL):
+            return False
+        pos = self.mouse(event.pos) if hasattr(event, "pos") else self.mouse()
+        if not self.board_viewport().collidepoint(pos) or any(rect.collidepoint(pos) for rect, _ in self.buttons):
+            return False
+        if event.type == pg.MOUSEBUTTONDOWN and event.button == 2:
+            self.camera_drag = "pan" if pg.key.get_mods() & pg.KMOD_SHIFT else "orbit"
+            return True
+        if event.type == pg.MOUSEWHEEL:
+            self.camera.magnify(-event.y if getattr(event, "flipped", False) else event.y)
+            return True
+        return False
+
+    def perspective_board_click(self, pos):
+        if not self.board_viewport().collidepoint(pos):
+            return
+        g = self.game
+        mode = self.active_mode()
+        if mode in ("settlement", "city"):
+            sites = g.city_sites(0) if mode == "city" else g.settlement_sites(0, g.phase == "setup_settlement")
+            if sites:
+                vertex = min(sites, key=lambda v: math.dist(pos, self.screen_point(v)))
+                if math.dist(pos, self.screen_point(vertex)) < 18:
+                    self.act(mode, vertex=vertex)
+        elif mode == "road":
+            sites = g.road_sites(0, g.setup_vertex if g.phase == "setup_road" else None)
+
+            def distance(edge):
+                a, b = [self.screen_point(v) for v in g.board.edges[edge]]
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                t = max(0, min(1, ((pos[0] - a[0]) * dx + (pos[1] - a[1]) * dy) / (dx * dx + dy * dy)))
+                return math.dist(pos, (a[0] + dx * t, a[1] + dy * t))
+
+            if sites:
+                edge = min(sites, key=distance)
+                if distance(edge) < 12:
+                    self.act("road", edge=edge)
+        elif g.phase == "robber":
+            world = self.camera.unproject(pos, self.camera_center())
+            if world is None:
+                return
+            for i, tile in enumerate(g.board.hexes):
+                cx, cy = self.scene.center(tile)
+                x, y = world[0] - cx, world[1] - cy
+                if max(x * math.cos(j * math.pi / 3) + y * math.sin(j * math.pi / 3)
+                       for j in range(6)) <= 79 * math.cos(math.pi / 6):
+                    self.act("robber", hex=i)
+                    break
 
     def tile(self, resource):
         key = (resource, self.scale)
@@ -580,6 +695,14 @@ class App:
         self.text(label, x, y, 13, GOLD, bold=True, center=True)
 
     def draw_board(self):
+        if self.perspective:
+            clip = self.canvas.get_clip()
+            self.canvas.set_clip(self.rect(self.board_viewport()))
+            try:
+                self.scene.draw(self)
+            finally:
+                self.canvas.set_clip(clip)
+            return
         g = self.game
         self.draw_sea_frame()
         for i in range(19):
@@ -939,9 +1062,16 @@ class App:
             self.text(("Juniper", "Flint", "Marina")[i], 875, y + 9, 20, COLORS[i + 1])
             self.button(self.difficulties[i], (1135, y, 175, 39), lambda j=i: self.toggle_difficulty(j), small=True)
         self.text("BOARD", 875, 557, 13, GOLD, bold=True)
-        self.button("Recommended" if self.recommended else "Random island", (875, 582, 435, 39), lambda: setattr(self, "recommended", not self.recommended))
-        self.text("Island seed (blank = random)", 875, 639, 15, MUTED)
-        self.button(self.seed_text + ("|" if self.edit_seed else ""), (1121, 632, 189, 34), lambda: setattr(self, "edit_seed", True), small=True)
+        self.button("2D board", (875, 582, 210, 34), lambda: self.set_perspective(False),
+                    accent=not self.perspective, small=True,
+                    tooltip="Use the classic illustrated board. Your current game is preserved.")
+        self.button("3D board", (1100, 582, 210, 34), lambda: self.set_perspective(True),
+                    accent=self.perspective, small=True,
+                    tooltip="Use the perspective board with orbit, pan, and zoom. Your current game is preserved.")
+        self.text("Island layout", 875, 625, 12, MUTED)
+        self.button("Recommended" if self.recommended else "Random island", (875, 643, 225, 34), lambda: setattr(self, "recommended", not self.recommended), small=True)
+        self.text("Island seed (blank = random)", 1121, 625, 11, MUTED)
+        self.button(self.seed_text + ("|" if self.edit_seed else ""), (1121, 643, 189, 34), lambda: setattr(self, "edit_seed", True), small=True)
         self.button("Set sail", (875, 693, 435, 51), self.new_game, accent=True)
         self.button("Resume autosave", (875, 758, 435, 40), self.load)
         if self.started:
@@ -1078,6 +1208,8 @@ class App:
         if self.started or not self.menu:
             self.draw_board()
         self.draw_header()
+        if not self.menu:
+            self.draw_view_controls()
         if self.menu:
             with self.shifted((self.width - W) / 2, (self.height - H) / 2):
                 self.draw_menu()
@@ -1108,6 +1240,9 @@ class App:
     def board_click(self, pos):
         g = self.game
         if self.menu or self.modal or g.actor != 0 or g.phase == "game_over":
+            return
+        if self.perspective:
+            self.perspective_board_click(pos)
             return
         mode = self.active_mode()
         if mode in ("settlement", "city"):
@@ -1170,6 +1305,8 @@ class App:
                     if not self.fullscreen:
                         self.window = pg.display.set_mode((max(720, event.w), max(480, event.h)), pg.RESIZABLE)
                     self.sync_canvas()
+                elif self.camera_event(event):
+                    pass
                 elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                     pos = self.mouse(event.pos)
                     handled = False

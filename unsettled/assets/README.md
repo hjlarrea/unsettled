@@ -15,3 +15,8 @@ and die pips; they do not require additional bitmap assets.
 `terrain.png` preserves the original full-bleed gouache atlas from the first
 version. Both illustrations were generated for this project. No official CATAN
 artwork, logos, or card illustrations are bundled.
+
+The perspective view also projects `terrain-classic.png` onto the ground plane.
+Rounded forest canopies and sheep use deterministic procedural sphere shading
+and material grain; mountain, clay, and dune relief use continuous height fields.
+These details are rendered in code and introduce no additional external artwork.
