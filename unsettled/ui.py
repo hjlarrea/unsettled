@@ -189,12 +189,23 @@ class App:
         self.mode = None
         self.modal = None
         self.last_action = pg.time.get_ticks()
-        self.next_bot = self.last_action + self.delay()
+        self.schedule_bot()
         self.autosave()
         return True
 
     def delay(self):
-        return (1100, 500, 80)[self.speed]
+        return (4000, 2500, 1200)[self.speed]
+
+    def schedule_bot(self):
+        self.bot_wait_started = pg.time.get_ticks()
+        self.bot_wait_duration = self.delay()
+        self.next_bot = self.bot_wait_started + self.bot_wait_duration
+
+    def bot_progress(self):
+        if self.menu or self.modal or self.autosave_error or self.game.actor == 0:
+            return None
+        duration = getattr(self, "bot_wait_duration", self.delay())
+        return max(0.0, min(1.0, 1 - (self.next_bot - pg.time.get_ticks()) / duration))
 
     def manual_save(self):
         try:
@@ -215,7 +226,7 @@ class App:
         self.started = True
         self.mode = self.modal = None
         self.autosave_error = False
-        self.next_bot = pg.time.get_ticks() + self.delay()
+        self.schedule_bot()
         self.notify("Welcome back. Your island is exactly where you left it.")
 
     def new_game(self):
@@ -230,14 +241,14 @@ class App:
         self.started = True
         self.mode = self.modal = None
         self.tile_cache.clear()
-        self.next_bot = pg.time.get_ticks() + self.delay()
+        self.schedule_bot()
         self.autosave()
 
     def toggle_menu(self):
         self.menu = not self.menu
         self.edit_seed = False
         self.mode = self.modal = None
-        self.next_bot = pg.time.get_ticks() + self.delay()
+        self.schedule_bot()
 
     def screen_point(self, v):
         x, y = self.game.board.vertices[v]
@@ -281,12 +292,129 @@ class App:
         return [(520 + (self.width - W) / 2 + radius * math.cos(i * math.pi / 3),
                  490 + (self.height - H) / 2 + radius * math.sin(i * math.pi / 3)) for i in range(6)]
 
+    def draw_sea_frame(self):
+        # Raised gold molding, with a chased vine between two fine bead rails.
+        shadow, bronze = (67, 49, 32), (130, 85, 37)
+        highlight = (255, 230, 169)
+        self.polygon(shadow, self.water_outline(435))
+        self.polygon(bronze, self.water_outline(432))
+        self.polygon(GOLD, self.water_outline(429))
+        self.polygon(highlight, self.water_outline(428), 2)
+        self.polygon(bronze, self.water_outline(411), 2)
+        self.polygon(highlight, self.water_outline(409), 1)
+        self.polygon(WATER_RIM, self.water_outline(408))
+        self.polygon(WATER, self.water_outline(403))
+        self.polygon(WATER_LINE, self.water_outline(395), 1)
+        outer = self.water_outline(420)
+        for i, (x, y) in enumerate(outer):
+            following = outer[(i + 1) % 6]
+            dx, dy = following[0] - x, following[1] - y
+            length = math.hypot(dx, dy)
+            tx, ty = dx / length, dy / length
+            nx, ny = -ty, tx
+
+            def at(t, across=0):
+                return (x + dx * t + nx * across,
+                        y + dy * t + ny * across)
+
+            # Continuous curling stem and paired embossed laurel leaves.
+            stem = [at(j / 120, 2 * math.sin(j / 120 * math.tau * 10))
+                    for j in range(121)]
+            for start, end in zip(stem, stem[1:]):
+                self.line(bronze, start, end, 1)
+            for j in range(1, 20):
+                t = j / 20
+                for side in (-1, 1):
+                    points = [at(t - .012), at(t - .008, side * 4),
+                              at(t + .011, side * 6), at(t + .006, side * 1)]
+                    self.polygon(bronze, points)
+                    self.line(highlight, at(t - .008, side),
+                              at(t + .008, side * 4), 1)
+            for j in range(1, 41):
+                self.circle(highlight, at(j / 41, -6), 1)
+                self.circle(bronze, at(j / 41, 7), 1)
+            # Engraved lozenge at each side's midpoint.
+            self.polygon(bronze, [at(.48), at(.5, -7), at(.52), at(.5, 7)])
+            self.polygon(highlight, [at(.486), at(.5, -5), at(.514), at(.5, 5)], 1)
+            self.circle((105, 139, 125), at(.5), 2)
+            # Six petalled corner rosettes, set into a dark gold bezel.
+            self.circle(bronze, (x, y), 11)
+            self.circle(highlight, (x, y), 9, 1)
+            for petal in range(6):
+                angle = petal * math.pi / 3
+                center = (x + 5 * math.cos(angle), y + 5 * math.sin(angle))
+                self.circle(GOLD, center, 3)
+                self.circle(highlight, (center[0] - 1, center[1] - 1), 1)
+            self.circle(bronze, (x, y), 4)
+            self.circle((121, 162, 143), (x, y), 2)
+
+    def draw_port(self, edge, kind):
+        a, b = [self.screen_point(v) for v in self.game.board.edges[edge]]
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        cx = 520 + (self.width - W) / 2
+        cy = 490 + (self.height - H) / 2
+        length = math.hypot(mx - cx, my - cy)
+        nx, ny = (mx - cx) / length, (my - cy) / length
+        tx, ty = -ny, nx
+
+        def at(outward, sideways=0):
+            return (mx + nx * outward + tx * sideways,
+                    my + ny * outward + ty * sideways)
+
+        # Planked access walks connect each eligible shore intersection.
+        shore = sorted((a, b), key=lambda v: (v[0] - mx) * tx + (v[1] - my) * ty)
+        for vertex, side in zip(shore, (-12, 12)):
+            end = at(25, side)
+            vx, vy = end[0] - vertex[0], end[1] - vertex[1]
+            span = math.hypot(vx, vy)
+            ux, uy = -vy / span, vx / span
+            corners = [(point[0] + ux * width, point[1] + uy * width)
+                       for point, width in ((vertex, -4), (end, -4), (end, 4), (vertex, 4))]
+            self.polygon((66, 51, 37), [(x + 1, y + 3) for x, y in corners])
+            self.polygon((158, 109, 64), corners)
+            for plank in range(max(1, int(span / 5))):
+                fraction = plank * 5 / span
+                px, py = vertex[0] + vx * fraction, vertex[1] + vy * fraction
+                self.line((224, 175, 109), (px - ux * 3, py - uy * 3),
+                          (px + ux * 3, py + uy * 3), 2)
+
+        # A slim landing joins the two walks without a broad dock platform.
+        deck = [at(22, -14), at(32, -14), at(32, 14), at(22, 14)]
+        self.polygon(WATER_LINE, [(x + 2, y + 4) for x, y in deck])
+        self.polygon((79, 52, 33), [(x, y + 2) for x, y in deck])
+        self.polygon((105, 68, 39), deck)
+        for distance, color in ((23, (175, 123, 71)), (28, (190, 139, 82))):
+            self.polygon(color, [at(distance, -13), at(distance + 4, -13),
+                                 at(distance + 4, 13), at(distance, 13)])
+            self.line((235, 188, 120), at(distance, -12), at(distance, 12), 1)
+            self.line((120, 78, 44), at(distance + 2, -7), at(distance + 2, 6), 1)
+            for side in (-10, 10):
+                self.circle((70, 61, 51), at(distance + 2, side), 1)
+        for side in (-15, 15):
+            x, y = at(27, side)
+            self.line((83, 54, 34), (x, y + 3), (x, y - 2), 4)
+            self.circle((111, 73, 41), (x, y - 2), 3)
+            self.circle((229, 184, 117), (x, y - 3), 2)
+            self.circle((140, 93, 50), (x, y - 3), 1)
+        # A tiny moored merchant vessel, drawn upright for legibility.
+        x, y = at(52)
+        self.ellipse(WATER_LINE, (x - 21, y + 11, 44, 9), 1)
+        self.polygon((88, 61, 42), [(x - 20, y + 6), (x + 20, y + 6),
+                                             (x + 12, y + 16), (x - 11, y + 16)])
+        self.line(GOLD, (x - 16, y + 8), (x + 15, y + 8), 2)
+        self.line((91, 70, 46), (x, y - 25), (x, y + 5), 2)
+        sail = LIGHT if kind == "any" else TERRAIN[TILE_ORDER.index(kind)]
+        self.polygon(sail, [(x - 2, y - 25), (x - 2, y + 2), (x - 18, y + 2)])
+        self.polygon((255, 240, 200), [(x + 3, y - 20), (x + 16, y + 1), (x + 3, y + 1)])
+        self.line((181, 152, 104), (x - 2, y - 25), (x - 18, y + 2))
+        x, y = at(40, 68)
+        self.panel((x - 37, y - 12, 74, 24), INK, 7, GOLD)
+        label = "3:1" if kind == "any" else kind[:2].upper() + " 2:1"
+        self.text(label, x, y, 13, GOLD, bold=True, center=True)
+
     def draw_board(self):
         g = self.game
-        # A regular six-sided sea frame surrounds the island and its ports.
-        self.polygon(WATER_RIM, self.water_outline())
-        self.polygon(WATER, self.water_outline(408))
-        self.polygon(WATER_LINE, self.water_outline(395), 1)
+        self.draw_sea_frame()
         for i in range(19):
             cx, cy = self.hex_center(i)
             points = [self.screen_point(v) for v in g.board.hex_vertices[i]]
@@ -294,15 +422,7 @@ class App:
             self.canvas.blit(self.tile(g.board.hexes[i]["resource"]), self.point((cx - 81, cy - 81)))
             self.polygon((112, 107, 78), points, 1)
         for edge, kind in g.board.ports.items():
-            a, b = [self.screen_point(v) for v in g.board.edges[edge]]
-            mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-            dx, dy = mid[0] - 520 - (self.width - W) / 2, mid[1] - 490 - (self.height - H) / 2
-            length = math.hypot(dx, dy)
-            x, y = mid[0] + dx / length * 41, mid[1] + dy / length * 41
-            for end in (a, b):
-                self.line((151, 153, 122), end, (x, y), 2)
-            self.panel((x - 34, y - 14, 68, 29), INK, 7, (105, 137, 136))
-            self.text("3:1" if kind == "any" else kind[:2].upper() + " 2:1", x, y + 1, 14, GOLD, center=True)
+            self.draw_port(edge, kind)
         for i, tile in enumerate(g.board.hexes):
             cx, cy = self.hex_center(i)
             n = tile["number"]
@@ -458,10 +578,51 @@ class App:
                 self.button("Menu", (1220, 27, 90, 38), self.toggle_menu, small=True)
                 self.text(f"Island {self.game.seed}", 1329, 80, 12, MUTED, center=True)
             self.button("Window" if self.fullscreen else "Full screen", (1320, 27, 100, 38), self.toggle_fullscreen, small=True)
+        if not self.menu:
+            with self.shifted((self.width - W) / 2):
+                self.draw_turn_banner()
         self.line((57, 83, 85), (40, 97), (self.width - 40, 97))
+
+    def draw_turn_banner(self):
+        g = self.game
+        human = g.actor == 0
+        phases = {
+            "setup_settlement": "Place a settlement", "setup_road": "Place a road",
+            "roll": "Roll dice", "main": "Trade & build", "discard": "Discard resources",
+            "robber": "Move the robber", "victim": "Choose a victim",
+            "road_building": "Road Building", "plenty": "Year of Plenty",
+            "monopoly": "Monopoly", "trade": "Respond to trade", "game_over": "Game over",
+        }
+        color = GOLD if human else COLORS[g.actor]
+        self.panel((320, 13, 600, 74), PANEL, 10, color)
+        if g.winner is not None:
+            heading = f"{g.players[g.winner].name.upper()} WINS"
+        else:
+            owner = "YOUR TURN" if g.current == 0 else f"{g.players[g.current].name.upper()}'S TURN"
+            heading = f"TURN {g.turn + 1}  /  {owner}"
+        self.text(heading, 336, 21, 12, color, bold=True)
+        self.text(phases[g.phase], 336, 39, 23, LIGHT, bold=True)
+        if g.winner is None:
+            if self.autosave_error:
+                detail = "Paused · save to retry"
+            elif self.modal:
+                detail = "Paused"
+            elif human:
+                detail = "Your move · take your time"
+            else:
+                detail = f"{g.players[g.actor].name} · next action"
+            # Right-align supporting text without changing the shared text helper.
+            width = self.font(max(1, round(13 * self.scale))).size(detail)[0] / self.scale
+            self.text(detail, 903 - width, 50, 13, MUTED)
+            progress = self.bot_progress()
+            if progress is not None:
+                self.panel((336, 75, 568, 4), INK, 2)
+                if progress > 0:
+                    self.panel((336, 75, max(2, 568 * progress), 4), color, 2)
 
     def cycle_speed(self):
         self.speed = (self.speed + 1) % 3
+        self.schedule_bot()
 
     def draw_players(self):
         g = self.game
@@ -772,6 +933,7 @@ class App:
                 self.open_modal("trade")
             return
         if self.modal is not None or self.autosave_error:
+            self.schedule_bot()
             return
         if pg.time.get_ticks() >= self.next_bot:
             try:
@@ -780,7 +942,7 @@ class App:
             except (RuleError, ValueError) as exc:
                 self.autosave_error = True
                 self.notify(f"Bot paused: {exc}. Save and reload to retry.", 15000)
-            self.next_bot = pg.time.get_ticks() + self.delay()
+            self.schedule_bot()
             self.last_action = pg.time.get_ticks()
 
     def run(self, screenshot=None):

@@ -178,8 +178,9 @@ def test_water_has_blue_hexagonal_outline(app):
     # Water reaches the six-sided frame's tips; its cutaway corners reveal the
     # surrounding tabletop rather than filling an oval or rectangle.
     assert app.canvas.get_at((120, 490))[:3] == WATER
-    assert app.canvas.get_at((900, 490))[:3] == WATER
-    assert app.canvas.get_at((520, 146))[:3] == WATER
+    # Sample beside the new harbor labels, within the sea frame.
+    assert app.canvas.get_at((900, 515))[:3] == WATER
+    assert app.canvas.get_at((520, 164))[:3] == WATER
     assert app.canvas.get_at((200, 266))[:3] == INK
     assert app.canvas.get_at((840, 706))[:3] == INK
 
@@ -298,3 +299,70 @@ def test_settlement_covers_intersection_and_road_guides(app):
     expected = app.canvas.get_at(center)
     assert expected[:3] != (0, 0, 0)
     assert actual == expected
+
+
+def test_slower_default_and_speed_changes_restart_countdown(app, monkeypatch):
+    ticks = [1000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks[0])
+    app.menu = False
+    app.game.current = 1
+    assert app.speed == 1
+    assert app.delay() == 2500
+    app.schedule_bot()
+    assert app.bot_progress() == 0
+    ticks[0] += 1250
+    assert app.bot_progress() == pytest.approx(.5)
+    app.cycle_speed()
+    assert app.delay() == 1200
+    assert app.bot_progress() == 0
+    ticks[0] += 1200
+    assert app.bot_progress() == 1
+    app.cycle_speed()
+    assert app.delay() == 4000
+    assert app.bot_progress() == 0
+
+
+def test_bot_countdown_waits_for_deadline_and_pauses_in_dialog(app, monkeypatch):
+    ticks = [1000]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks[0])
+    monkeypatch.setattr(app, "autosave", lambda: None)
+    steps = []
+    monkeypatch.setattr(bots, "step", lambda game: steps.append(game.actor))
+    app.menu = False
+    app.game.current = 1
+    app.schedule_bot()
+    ticks[0] = 3499
+    app.update()
+    assert steps == []
+    app.open_modal("journal")
+    ticks[0] = 4000
+    app.update()
+    assert app.bot_progress() is None
+    assert steps == []
+    app.modal = None
+    app.update()
+    assert app.bot_progress() == 0
+    ticks[0] += 2500
+    app.update()
+    assert steps == [1]
+    assert app.bot_progress() == 0
+    app.game.current = 0
+    assert app.bot_progress() is None
+
+
+def test_phase_banner_identifies_human_response_during_computer_turn(app, monkeypatch):
+    app.menu = False
+    g = app.game
+    g.current, g.phase = 1, "main"
+    g.players[1].hand["wood"] = 1
+    g.bank["wood"] -= 1
+    g.command(1, "offer", target=0, give={"wood": 1}, want={"ore": 1})
+    labels = []
+    monkeypatch.setattr(app, "text", lambda label, *args, **kwargs: labels.append(label))
+    before = g.to_dict()
+    app.draw_turn_banner()
+    assert any("JUNIPER'S TURN" in label for label in labels)
+    assert "Respond to trade" in labels
+    assert "Your move · take your time" in labels
+    assert app.bot_progress() is None
+    assert g.to_dict() == before

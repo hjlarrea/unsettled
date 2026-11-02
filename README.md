@@ -10,7 +10,8 @@ while playing.
 
 The dark tabletop uses illustrated woodland, terracotta quarries, golden fields,
 green pastures, lavender mountains, and sandy tile borders, surrounded by a
-light-blue hexagonal sea. Beveled roads and faceted settlements and cities give
+light-blue hexagonal sea with an engraved golden frame. Wooden piers and
+moored sailboats mark the nine ports. Beveled roads and faceted settlements and cities give
 the board a painted wooden-piece feel. Text renders at the window's native
 resolution.
 
@@ -81,8 +82,11 @@ Click **Set sail** to start.
 - Development cards appear along the bottom. Playable cards become buttons;
   new purchases must wait until a later turn. Victory Point cards count
   automatically. Only one action development card may be played per turn.
-- **Slow / Normal / Fast** adjusts the pause between bot actions. No human
-  decision has a time limit. Open **Menu** to pause and configure a new game.
+- The header highlights the current turn and phase, including trade responses
+  and robber decisions. During computer turns, its bar fills until the next
+  action; each action starts a fresh bar. Dialogs pause computer play.
+- **Slow / Normal / Fast** pauses 4.0 / 2.5 / 1.2 seconds between bot actions.
+  Normal is the default. No human decision has a time limit. Open **Menu** to pause and configure a new game.
 - **Journal** or **L** opens the public event history. **Escape** closes a dialog,
   cancels a selected build tool, or opens/closes the menu. **Cmd+S** / **Ctrl+S**
   saves manually.
