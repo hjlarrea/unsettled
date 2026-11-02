@@ -48,6 +48,10 @@ class App:
         self.edit_seed = False
         self.speed = 1
         self.buttons = []
+        self.tooltips = []
+        self.tooltip_target = None
+        self.tooltip_since = 0
+        self.tooltip_rect = None
         self.mode = None
         self.modal = None
         self.toast = ""
@@ -152,7 +156,7 @@ class App:
         if border:
             pg.draw.rect(self.canvas, border, native_rect, self.stroke(1), border_radius=native_radius)
 
-    def button(self, label, rect, callback, active=True, accent=False, small=False):
+    def button(self, label, rect, callback, active=True, accent=False, small=False, tooltip=None):
         rect = pg.Rect(rect)
         mouse = self.mouse()
         hover = rect.move(self.offset).collidepoint(mouse)
@@ -162,8 +166,98 @@ class App:
         self.panel(rect, color, radius=8, border=(GOLD if hover and active else None))
         self.text(label, rect.centerx, rect.centery, 16 if small else 19,
                   INK if accent else LIGHT if active else (91, 116, 119), bold=accent, center=True)
+        if tooltip:
+            self.tooltips.append((rect.move(self.offset), tooltip))
         if active:
             self.buttons.append((rect.move(self.offset), callback))
+
+    def draw_tooltip(self):
+        mouse = self.mouse()
+        target = next(((tuple(rect), text) for rect, text in reversed(self.tooltips)
+                       if rect.collidepoint(mouse)), None)
+        self.tooltip_rect = None
+        if target != self.tooltip_target:
+            self.tooltip_target = target
+            self.tooltip_since = pg.time.get_ticks()
+        if target is None or pg.time.get_ticks() - self.tooltip_since < 350:
+            return
+        # Measure at native resolution so text wraps correctly at every scale.
+        font = self.font(max(1, round(16 * self.scale)))
+        max_width = min(340, self.width - 48)
+        lines = []
+        for paragraph in target[1].split("\n"):
+            line = ""
+            for word in paragraph.split():
+                candidate = (line + " " + word).strip()
+                if line and font.size(candidate)[0] / self.scale > max_width:
+                    lines.append(line)
+                    line = word
+                else:
+                    line = candidate
+            lines.append(line)
+        width = max(font.size(line)[0] / self.scale for line in lines) + 24
+        height = len(lines) * 22 + 20
+        x = max(12, min(mouse[0] + 16, self.width - width - 12))
+        y = mouse[1] + 22
+        if y + height > self.height - 12:
+            y = mouse[1] - height - 14
+        y = max(12, min(y, self.height - height - 12))
+        self.tooltip_rect = pg.Rect(round(x), round(y), math.ceil(width), math.ceil(height))
+        self.panel((x + 3, y + 4, width, height), (10, 23, 29), 8)
+        self.panel((x, y, width, height), PANEL, 8, GOLD)
+        for i, line in enumerate(lines):
+            self.text(line, x + 12, y + 10 + i * 22, 16, LIGHT)
+
+    def purchase_tooltip(self, kind, sites=None):
+        g = self.game
+        cost = COSTS[kind]
+        lines = ["Cost: " + self.bundle_label(cost) + "."]
+        missing = {r: n - g.players[0].hand[r] for r, n in cost.items()
+                   if g.players[0].hand[r] < n}
+        if missing:
+            lines.append("You need " + self.bundle_label(missing) + " more.")
+        if kind == "development":
+            if not g.deck:
+                lines.append("The development card deck is empty.")
+            else:
+                lines.append("Draw a development card. Play action cards on a later turn.")
+        elif not sites:
+            exhausted = (sum(owner == 0 for owner in g.roads.values()) >= 15 if kind == "road"
+                         else g.pieces(0, 1 if kind == "settlement" else 2) >= (5 if kind == "settlement" else 4))
+            if exhausted:
+                lines.append(f"No {kind} pieces left.")
+            else:
+                lines.append({"road": "No open edges connect to your roads or buildings.",
+                              "settlement": "No legal sites. Connect a road to an empty intersection at least two edges from other buildings.",
+                              "city": "You need one of your settlements to upgrade."}[kind])
+        else:
+            lines.append({"road": "Choose a highlighted edge to build a road.",
+                          "settlement": "Choose a highlighted intersection to build a settlement.",
+                          "city": "Upgrade one of your settlements to a city."}[kind])
+        return "\n".join(lines)
+
+    def card_tooltip(self, card):
+        g = self.game
+        effect = {"knight": "Move the robber and steal a resource from a neighbor.",
+                  "roads": "Build up to two roads for free.",
+                  "plenty": "Take two available resources from the bank.",
+                  "monopoly": "Take all resources of one type from every opponent.",
+                  "victory": "Worth 1 hidden victory point. Counted automatically; never played."}[card]
+        if card == "victory":
+            return effect
+        if g.winner is not None:
+            reason = "The game has ended."
+        elif g.actor != 0 or g.current != 0:
+            reason = "Wait for your turn to play this card."
+        elif g.phase not in ("roll", "main"):
+            reason = "Finish the current action before playing a development card."
+        elif g.played_card:
+            reason = "You have already played a development card this turn."
+        elif not any(c == card and bought < g.turn for c, bought in g.players[0].cards):
+            reason = "You cannot play a card on the turn you bought it."
+        else:
+            reason = "Play before or after rolling. Only one development card per turn."
+        return effect + "\n" + reason
 
     def mouse(self, pos=None):
         pos = pos or pg.mouse.get_pos()
@@ -772,24 +866,24 @@ class App:
             self.button("Back to menu", (1060, y, 320, 44), self.toggle_menu, accent=True)
         elif human:
             if g.phase == "roll":
-                self.button("Roll dice", (1060, y, 320, 46), lambda: self.act("roll"), accent=True)
+                self.button("Roll dice", (1060, y, 320, 46), lambda: self.act("roll"), accent=True, tooltip="Roll both dice to produce resources. A seven activates the robber.")
             elif g.phase == "main":
                 for i, (label, kind) in enumerate((("Road", "road"), ("Settlement", "settlement"), ("City", "city"))):
                     sites = g.road_sites(0) if kind == "road" else g.settlement_sites(0) if kind == "settlement" else g.city_sites(0)
-                    self.button(label, (1060 + (i % 2) * 165, y + (i // 2) * 45, 155, 37), lambda k=kind: self.set_mode(k), active=g.afford(0, kind) and bool(sites), accent=self.mode == kind, small=True)
-                self.button("Buy card", (1225, y + 45, 155, 37), lambda: self.act("buy"), active=g.afford(0, "development") and bool(g.deck), small=True)
-                self.button("Bank / ports", (1060, y + 90, 155, 37), lambda: self.open_modal("bank"), small=True)
-                self.button("Player trade", (1225, y + 90, 155, 37), lambda: self.open_modal("offer"), small=True)
-                self.button("End turn", (1060, y + 137, 320, 43), lambda: self.act("end"), accent=True)
+                    self.button(label, (1060 + (i % 2) * 165, y + (i // 2) * 45, 155, 37), lambda k=kind: self.set_mode(k), active=g.afford(0, kind) and bool(sites), accent=self.mode == kind, small=True, tooltip=self.purchase_tooltip(kind, sites))
+                self.button("Buy card", (1225, y + 45, 155, 37), lambda: self.act("buy"), active=g.afford(0, "development") and bool(g.deck), small=True, tooltip=self.purchase_tooltip("development"))
+                self.button("Bank / ports", (1060, y + 90, 155, 37), lambda: self.open_modal("bank"), small=True, tooltip="Trade resources with the bank. Your best port rate applies automatically.")
+                self.button("Player trade", (1225, y + 90, 155, 37), lambda: self.open_modal("offer"), small=True, tooltip="Offer resources to an opponent in exchange for resources you need.")
+                self.button("End turn", (1060, y + 137, 320, 43), lambda: self.act("end"), accent=True, tooltip="Finish your turn and pass play to the next player.")
             elif g.phase in ("discard", "plenty", "monopoly"):
-                self.button("Choose resources", (1060, y, 320, 44), lambda: self.open_modal(g.phase), accent=True)
+                self.button("Choose resources", (1060, y, 320, 44), lambda: self.open_modal(g.phase), accent=True, tooltip={"discard": "Choose the required number of resources to return to the bank.", "plenty": "Choose up to two available resources from the bank.", "monopoly": "Choose the resource type to collect from all opponents."}[g.phase])
             elif g.phase == "trade":
-                self.button("View trade offer", (1060, y, 320, 44), lambda: self.open_modal("trade"), accent=True)
+                self.button("View trade offer", (1060, y, 320, 44), lambda: self.open_modal("trade"), accent=True, tooltip="Review the offer, then accept, decline, or make a counteroffer.")
             elif g.phase == "victim":
                 for i, victim in enumerate(g.victims):
-                    self.button(g.players[victim].name, (1060, y + i * 44, 320, 37), lambda v=victim: self.act("steal", victim=v))
+                    self.button(g.players[victim].name, (1060, y + i * 44, 320, 37), lambda v=victim: self.act("steal", victim=v), tooltip="Steal one random resource from this opponent.")
             elif g.phase == "road_building":
-                self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"))
+                self.button("Finish free roads", (1060, y, 320, 42), lambda: self.act("skip_roads"), tooltip="Finish Road Building without placing the remaining free roads.")
 
     def draw_board_status(self):
         self.draw_dice()
@@ -816,7 +910,7 @@ class App:
         for card, count in counts.items():
             label = f"{CARD_NAMES[card]} ×{count}"
             width = max(150, self.font(16).size(label)[0] + 28)
-            self.button(label, (x, 900, width, 37), lambda c=card: self.act("play", card=c), active=g.actor == 0 and g.phase in ("roll", "main") and card in g.playable(0), small=True)
+            self.button(label, (x, 900, width, 37), lambda c=card: self.act("play", card=c), active=g.actor == 0 and g.phase in ("roll", "main") and card in g.playable(0), small=True, tooltip=self.card_tooltip(card))
             x += width + 10
 
     def draw_log(self):
@@ -883,6 +977,7 @@ class App:
         self.canvas.blit(shade, (0, 0))
         # Remove underlying hit targets; modal owns input until dismissed.
         self.buttons = []
+        self.tooltips = []
         self.panel((365, 152, 710, 650), INK, 22, (105, 133, 131))
         kind = m["kind"]
         titles = dict(bank="Trade with the bank", offer="Propose a trade", counter="Make a counteroffer", trade="At the trading table", discard="Return resources", plenty="Year of Plenty", monopoly="Monopoly", journal="Table journal")
@@ -912,9 +1007,9 @@ class App:
             self.wrap(self.bundle_label(t["give"]), 410, 305, 610, 26, LIGHT)
             self.text("In exchange for", 410, 395, 22, GOLD)
             self.wrap(self.bundle_label(t["want"]), 410, 437, 610, 26, LIGHT)
-            self.button("Accept trade", (410, 616, 290, 48), lambda: self.act("respond", accept=True), active=all(self.game.players[0].hand[r] >= n for r, n in t["want"].items()), accent=True)
+            self.button("Accept trade", (410, 616, 290, 48), lambda: self.act("respond", accept=True), active=all(self.game.players[0].hand[r] >= n for r, n in t["want"].items()), accent=True, tooltip="Exchange the offered resources." if all(self.game.players[0].hand[r] >= n for r, n in t["want"].items()) else "You do not have the resources requested by this trade.")
             self.button("Decline", (724, 616, 300, 48), lambda: self.act("respond", accept=False))
-            self.button("Counteroffer", (410, 685, 614, 42), lambda: self.open_modal("counter"), active=not t["countered"])
+            self.button("Counteroffer", (410, 685, 614, 42), lambda: self.open_modal("counter"), active=not t["countered"], tooltip="Propose different terms." if not t["countered"] else "Only one counteroffer is allowed per negotiation.")
             return
         if kind == "bank":
             give, receive = RESOURCES[m["give_r"]], RESOURCES[m["receive_r"]]
@@ -926,7 +1021,15 @@ class App:
                 self.button(f"{ratio if r == give else self.game.ratio(0, r)} {r.title()}", (410, y, 282, 43), lambda j=i: m.update(give_r=j), accent=give == r)
                 self.button(f"1 {r.title()} ({self.game.bank[r]} left)", (740, y, 282, 43), lambda j=i: m.update(receive_r=j), accent=receive == r)
             self.wrap("Your ports are applied automatically. Click a resource in each column.", 410, 608, 610, 19)
-            self.button("Trade", (410, 716, 612, 46), lambda: self.act("bank_trade", give=give, receive=receive), active=give != receive and self.game.players[0].hand[give] >= ratio and self.game.bank[receive] > 0, accent=True)
+            reasons = []
+            if give == receive:
+                reasons.append("Choose different resources to give and receive.")
+            if self.game.players[0].hand[give] < ratio:
+                reasons.append(f"You need {ratio - self.game.players[0].hand[give]} more {give}.")
+            if not self.game.bank[receive]:
+                reasons.append(f"The bank has no {receive} left.")
+            trade_tooltip = f"Trade {ratio} {give} for 1 {receive}." + ("\n" + "\n".join(reasons) if reasons else "")
+            self.button("Trade", (410, 716, 612, 46), lambda: self.act("bank_trade", give=give, receive=receive), active=give != receive and self.game.players[0].hand[give] >= ratio and self.game.bank[receive] > 0, accent=True, tooltip=trade_tooltip)
             return
         trading = kind in ("offer", "counter")
         if trading:
@@ -970,6 +1073,7 @@ class App:
         if self.scale != previous_scale:
             self.tile_cache.clear()
         self.buttons = []
+        self.tooltips = []
         self.canvas.fill(INK)
         if self.started or not self.menu:
             self.draw_board()
@@ -995,6 +1099,7 @@ class App:
         if self.toast and pg.time.get_ticks() < self.toast_until:
             self.panel((300, 103, 820, 48), (81, 62, 44), 10, GOLD)
             self.wrap(self.toast, 317, 116, 786, 16, LIGHT, 1)
+        self.draw_tooltip()
         _, viewport = self.viewport()
         self.window.fill((10, 23, 29))
         self.window.blit(self.canvas, viewport.topleft)

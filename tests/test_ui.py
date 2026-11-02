@@ -475,3 +475,73 @@ def test_attention_stays_still_when_no_action_is_available(app, monkeypatch, pau
         monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
         colors.append(app.human_attention_color())
     assert colors[0] == colors[1]
+
+
+@pytest.mark.parametrize("size", [(720, 480), (1440, 960), (2560, 1080)])
+def test_disabled_purchase_tooltip_hover_resize_and_modal(app, monkeypatch, size):
+    app.window = pg.display.set_mode(size)
+    app.menu = False
+    app.game.phase, app.game.current = "main", 0
+    ticks = [0]
+    monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks[0])
+    app.render()
+    rect, message = next((rect, text) for rect, text in app.tooltips
+                         if text.startswith("Cost: 1 wheat, 1 sheep, 1 ore."))
+    assert "You need 1 wheat, 1 sheep, 1 ore more." in message
+    assert not any(button.collidepoint(rect.center) for button, _ in app.buttons)
+    monkeypatch.setattr(app, "mouse", lambda pos=None: rect.center)
+    before = app.game.to_dict()
+    app.render()
+    assert app.tooltip_rect is None
+    ticks[0] = 400
+    app.render()
+    assert app.tooltip_rect is not None
+    native = app.rect(app.tooltip_rect)
+    assert app.canvas.get_rect().contains(native)
+    assert app.game.to_dict() == before
+    app.open_modal("journal")
+    app.render()
+    assert app.tooltip_rect is None
+    assert not any(text.startswith("Cost:") for _, text in app.tooltips)
+
+
+def test_purchase_tooltips_track_resources_deck_and_legal_sites(app):
+    g = app.game
+    g.phase, g.current = "main", 0
+    g.players[0].hand.update(wheat=1, sheep=1, ore=1)
+    assert "You need" not in app.purchase_tooltip("development")
+    g.deck.clear()
+    assert "deck is empty" in app.purchase_tooltip("development")
+    assert "settlements to upgrade" in app.purchase_tooltip("city", g.city_sites(0))
+    vertex = g.settlement_sites(0, True)[0]
+    g.buildings[vertex] = [0, 1]
+    assert "settlements to upgrade" not in app.purchase_tooltip("city", g.city_sites(0))
+    assert "You need 1 wheat, 2 ore more." in app.purchase_tooltip("city", g.city_sites(0))
+
+
+def test_development_card_tooltips_explain_play_restrictions(app):
+    g = app.game
+    g.current, g.phase, g.turn = 0, "main", 4
+    g.players[0].cards = [["knight", 4], ["victory", 4]]
+    assert "turn you bought it" in app.card_tooltip("knight")
+    assert "Counted automatically" in app.card_tooltip("victory")
+    g.players[0].cards.append(["knight", 3])
+    assert "Play before or after rolling" in app.card_tooltip("knight")
+    g.played_card = True
+    assert "already played" in app.card_tooltip("knight")
+    g.current = 1
+    assert "Wait for your turn" in app.card_tooltip("knight")
+
+
+def test_bank_trade_tooltip_explains_all_blockers(app):
+    app.game.current, app.game.phase = 0, "main"
+    app.open_modal("bank")
+    app.modal["receive_r"] = app.modal["give_r"]
+    app.game.bank["wood"] = 0
+    app.draw_modal()
+    rect, message = next((rect, text) for rect, text in app.tooltips
+                         if text.startswith("Trade 4 wood for 1 wood."))
+    assert "Choose different resources" in message
+    assert "You need 4 more wood" in message
+    assert "bank has no wood" in message
+    assert not any(button.collidepoint(rect.center) for button, _ in app.buttons)
