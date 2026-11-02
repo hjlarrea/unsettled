@@ -177,12 +177,16 @@ def test_water_has_blue_hexagonal_outline(app):
     app.render()
     # Water reaches the six-sided frame's tips; its cutaway corners reveal the
     # surrounding tabletop rather than filling an oval or rectangle.
-    assert app.canvas.get_at((120, 490))[:3] == WATER
-    # Sample beside the new harbor labels, within the sea frame.
-    assert app.canvas.get_at((900, 515))[:3] == WATER
-    assert app.canvas.get_at((520, 164))[:3] == WATER
+    for point in ((120, 490), (900, 515), (520, 164)):
+        red, green, blue = app.canvas.get_at(point)[:3]
+        assert blue > green > red
+        assert red < WATER[0]
     assert app.canvas.get_at((200, 266))[:3] == INK
     assert app.canvas.get_at((840, 706))[:3] == INK
+    # Isolate the sea from tiles and ports to check depth toward the frame.
+    app.draw_sea_frame()
+    brightness = [sum(app.canvas.get_at((x, 490))[:3]) for x in (120, 160, 200, 240)]
+    assert all(outer < inner for outer, inner in zip(brightness, brightness[1:]))
 
 
 def test_fullscreen_restores_window_and_preserves_game(app, monkeypatch):
@@ -366,3 +370,108 @@ def test_phase_banner_identifies_human_response_during_computer_turn(app, monkey
     assert "Your move · take your time" in labels
     assert app.bot_progress() is None
     assert g.to_dict() == before
+
+
+@pytest.mark.parametrize("opponents", [2, 3])
+@pytest.mark.parametrize("first", [0, 1, 2])
+def test_sidebar_follows_turn_order_and_keeps_resources_with_human(app, monkeypatch, opponents, first):
+    g = app.game = Game(bots=opponents, seed=1)
+    order = [(first + offset) % len(g.players) for offset in range(len(g.players))]
+    g.setup_order = order + order[::-1]
+    labels, markers = [], []
+    monkeypatch.setattr(app, "text", lambda label, x, y, *args, **kwargs: labels.append((label, x, y)))
+    monkeypatch.setattr(app, "draw_turn_marker", lambda x, y: markers.append((x, y)))
+    seats = {}
+    y = 117
+    for player in order:
+        seats[player] = y
+        y += 146 if player == 0 else 66
+    for current in reversed(order):
+        g.current = current
+        before = g.to_dict()
+        labels.clear()
+        markers.clear()
+        app.draw_players()
+        names = [(label, y) for label, x, y in labels if label in {p.name for p in g.players}]
+        assert names == [(g.players[player].name, seats[player] + 9) for player in order]
+        assert ("Wood", 1087, seats[0] + 76) in labels
+        assert markers == [(1037, seats[current] + 29)]
+        assert g.to_dict() == before
+
+
+@pytest.mark.parametrize("phase", ["trade", "discard", "game_over"])
+def test_sidebar_marker_tracks_turn_owner_during_responses(app, monkeypatch, phase):
+    g = app.game
+    g.current, g.phase = 1, phase
+    g.trade = {"target": 0}
+    g.discards = {0: 1}
+    g.winner = 1 if phase == "game_over" else None
+    markers = []
+    monkeypatch.setattr(app, "draw_turn_marker", lambda x, y: markers.append((x, y)))
+    app.draw_players()
+    assert len(markers) == (0 if g.winner is not None else 1)
+    if markers:
+        assert g.actor == 0
+        order = g.setup_order[:len(g.players)]
+        preceding = order[:order.index(g.current)]
+        assert markers[0] == (1037, 117 + sum(146 if i == 0 else 66 for i in preceding) + 29)
+
+
+@pytest.mark.parametrize("size", [(960, 640), (1440, 960), (2560, 1080)])
+def test_turn_arrow_renders_beside_current_box_at_native_size(app, size):
+    from unsettled.ui import GOLD, INK
+    app.window = pg.display.set_mode(size)
+    app.sync_canvas()
+    app.canvas.fill(INK)
+    g = app.game
+    g.current = g.setup_order[0]
+    with app.shifted(app.width - 1440):
+        app.draw_players()
+        assert app.canvas.get_at(app.point((1017, 146)))[:3] == GOLD
+        assert app.canvas.get_at(app.point((1017, 212)))[:3] == INK
+
+
+@pytest.mark.parametrize("phase,current,actor", [
+    ("setup_settlement", 0, 0), ("roll", 0, 0), ("main", 0, 0),
+    ("trade", 1, 0), ("discard", 1, 0), ("main", 1, 1),
+])
+def test_attention_breathes_only_for_human_input(app, monkeypatch, phase, current, actor):
+    from unsettled.ui import GOLD
+    app.menu = False
+    g = app.game
+    g.phase, g.current = phase, current
+    g.trade = {"target": actor}
+    g.discards = {actor: 1}
+    before = g.to_dict()
+    frames = []
+    for ticks in (0, 1100, 2200):
+        monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
+        app.draw_turn_banner()
+        app.draw_turn_marker(1037, 146)
+        frames.append((app.canvas.get_at(app.point((620, 13)))[:3],
+                       app.canvas.get_at(app.point((1017, 146)))[:3]))
+    assert frames[0] == frames[2]
+    if actor == 0:
+        assert frames[0][0] != frames[1][0]
+        assert frames[1][0] == GOLD
+    else:
+        assert frames[0] == frames[1]
+    assert (frames[0][1] != frames[1][1]) == (current == actor == 0)
+    assert g.to_dict() == before
+
+
+@pytest.mark.parametrize("paused", ["menu", "autosave_error", "journal", "game_over"])
+def test_attention_stays_still_when_no_action_is_available(app, monkeypatch, paused):
+    app.menu = False
+    app.game.current = 0
+    if paused == "journal":
+        app.modal = {"kind": "journal"}
+    elif paused == "game_over":
+        app.game.phase, app.game.winner = "game_over", 0
+    else:
+        setattr(app, paused, True)
+    colors = []
+    for ticks in (0, 1100):
+        monkeypatch.setattr(pg.time, "get_ticks", lambda: ticks)
+        colors.append(app.human_attention_color())
+    assert colors[0] == colors[1]

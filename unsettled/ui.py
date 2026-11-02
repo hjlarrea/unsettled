@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 from contextlib import contextmanager
+from collections import Counter
 import os
 import random
 from pathlib import Path
@@ -280,6 +281,30 @@ class App:
         framed = pg.Surface((size, size), pg.SRCALPHA)
         outer = [(81 + 78 * math.cos(math.pi / 6 + i * math.pi / 3), 81 + 78 * math.sin(math.pi / 6 + i * math.pi / 3)) for i in range(6)]
         pg.draw.polygon(framed, (224, 185, 121), outer)
+        # Fixed local randomness keeps the grain still and leaves game RNG alone.
+        grain = random.Random(410 + index)
+        normals = [(math.cos(i * math.pi / 3), math.sin(i * math.pi / 3))
+                   for i in range(6)]
+        for _ in range(1100):
+            x, y = grain.uniform(-78, 78), grain.uniform(-78, 78)
+            distance = max(x * nx + y * ny for nx, ny in normals)
+            if 68 * math.cos(math.pi / 6) < distance < 78 * math.cos(math.pi / 6) - 1:
+                color = grain.choice([(193, 154, 97), (239, 206, 149),
+                                      (210, 169, 108), (247, 218, 165)])
+                pg.draw.line(framed, color, (round(81 + x), round(81 + y)),
+                             (round(81 + x + grain.choice((0, 1))), round(81 + y)))
+        # Short, broken dune contours follow each sandy shoulder.
+        for side in range(6):
+            angle = side * math.pi / 3
+            nx, ny = math.cos(angle), math.sin(angle)
+            tx, ty = -ny, nx
+            for j in range(4):
+                along = -24 + j * 15 + grain.uniform(-2, 2)
+                distance = grain.uniform(62, 65)
+                ripple = [(81 + nx * (distance + .5 * math.sin(k)) + tx * (along + k),
+                           81 + ny * (distance + .5 * math.sin(k)) + ty * (along + k))
+                          for k in range(8)]
+                pg.draw.lines(framed, (236, 201, 143), False, ripple, 1)
         framed.blit(surface, (0, 0))
         pg.draw.polygon(framed, (184, 148, 93), points, 1)
         native_size = max(1, round(size * self.scale))
@@ -302,9 +327,14 @@ class App:
         self.polygon(highlight, self.water_outline(428), 2)
         self.polygon(bronze, self.water_outline(411), 2)
         self.polygon(highlight, self.water_outline(409), 1)
-        self.polygon(WATER_RIM, self.water_outline(408))
-        self.polygon(WATER, self.water_outline(403))
-        self.polygon(WATER_LINE, self.water_outline(395), 1)
+        self.polygon((44, 94, 137), self.water_outline(408))
+        # Nested hexes keep the depth gradient parallel to the outer frame.
+        deep = (42, 100, 146)
+        for radius in range(403, 277, -2):
+            blend = (403 - radius) / 125
+            blend = blend * blend * (3 - 2 * blend)
+            color = tuple(round(a + (b - a) * blend) for a, b in zip(deep, WATER))
+            self.polygon(color, self.water_outline(radius))
         outer = self.water_outline(420)
         for i, (x, y) in enumerate(outer):
             following = outer[(i + 1) % 6]
@@ -347,6 +377,49 @@ class App:
                 self.circle(highlight, (center[0] - 1, center[1] - 1), 1)
             self.circle(bronze, (x, y), 4)
             self.circle((121, 162, 143), (x, y), 2)
+
+    def draw_shoreline(self):
+        board = self.game.board
+        counts = Counter(tuple(sorted((vs[i], vs[(i + 1) % 6])))
+                         for vs in board.hex_vertices for i in range(6))
+        for tile, vertices in enumerate(board.hex_vertices):
+            cx, cy = self.hex_center(tile)
+            for i, vertex in enumerate(vertices):
+                following = vertices[(i + 1) % 6]
+                if counts[tuple(sorted((vertex, following)))] != 1:
+                    continue
+                a, b = self.screen_point(vertex), self.screen_point(following)
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                length = math.hypot(dx, dy)
+                nx, ny = dy / length, -dx / length
+                if nx * ((a[0] + b[0]) / 2 - cx) + ny * ((a[1] + b[1]) / 2 - cy) < 0:
+                    nx, ny = -nx, -ny
+
+                def at(t, outward):
+                    return (a[0] + dx * t + nx * outward,
+                            a[1] + dy * t + ny * outward)
+
+                # A narrow damp beach, then translucent-looking shallow water.
+                self.polygon((115, 190, 206), [at(0, 2), at(1, 2), at(1, 10), at(0, 10)])
+                self.polygon((192, 163, 111), [at(0, -1), at(1, -1), at(1, 3), at(0, 3)])
+                self.line((237, 207, 154), at(.03, -1), at(.97, -1))
+                # Two irregular, broken breakers; ports and pieces render above them.
+                phase = vertex * 1.7
+                for band, color, width in ((7, (233, 246, 231), 2),
+                                           (18, (186, 226, 226), 1)):
+                    previous = None
+                    for step in range(41):
+                        t = step / 40
+                        point = at(t, band + 1.6 * math.sin(t * math.tau * 2 + phase)
+                                   + .6 * math.sin(t * math.tau * 5 + phase))
+                        if previous is not None and math.sin(t * 27 + phase + band) > -.55:
+                            self.line(color, previous, point, width)
+                        previous = point
+                foam = random.Random(vertex * 97 + following)
+                for _ in range(15):
+                    t = foam.uniform(.04, .96)
+                    distance = foam.uniform(4, 13)
+                    self.circle((220, 240, 229), at(t, distance), foam.choice((.5, .7, 1)))
 
     def draw_port(self, edge, kind):
         a, b = [self.screen_point(v) for v in self.game.board.edges[edge]]
@@ -421,6 +494,7 @@ class App:
             self.polygon((211, 190, 145), [(int(cx + (x - cx) * 1.028), int(cy + (y - cy) * 1.028)) for x, y in points])
             self.canvas.blit(self.tile(g.board.hexes[i]["resource"]), self.point((cx - 81, cy - 81)))
             self.polygon((112, 107, 78), points, 1)
+        self.draw_shoreline()
         for edge, kind in g.board.ports.items():
             self.draw_port(edge, kind)
         for i, tile in enumerate(g.board.hexes):
@@ -583,6 +657,17 @@ class App:
                 self.draw_turn_banner()
         self.line((57, 83, 85), (40, 97), (self.width - 40, 97))
 
+    def human_attention_color(self):
+        """Breathe gently while waiting for human input; keep text steady."""
+        if (self.menu or self.autosave_error or self.game.winner is not None
+                or self.game.actor != 0
+                or (self.modal and self.modal["kind"] == "journal")):
+            return GOLD
+        # A smooth 2.2-second cycle, with a visible border even at its dimmest.
+        strength = .8 - .2 * math.cos(pg.time.get_ticks() * math.tau / 2200)
+        return tuple(round(base + (gold - base) * strength)
+                     for base, gold in zip(PANEL, GOLD))
+
     def draw_turn_banner(self):
         g = self.game
         human = g.actor == 0
@@ -594,7 +679,7 @@ class App:
             "monopoly": "Monopoly", "trade": "Respond to trade", "game_over": "Game over",
         }
         color = GOLD if human else COLORS[g.actor]
-        self.panel((320, 13, 600, 74), PANEL, 10, color)
+        self.panel((320, 13, 600, 74), PANEL, 10, self.human_attention_color() if human else color)
         if g.winner is not None:
             heading = f"{g.players[g.winner].name.upper()} WINS"
         else:
@@ -626,9 +711,13 @@ class App:
 
     def draw_players(self):
         g = self.game
-        for i, p in enumerate(g.players):
-            y = 117 + i * 66 + (80 if i else 0)
+        # Keep seats fixed in first-round order, including during snake setup.
+        y = 117
+        for i in g.setup_order[:len(g.players)]:
+            p = g.players[i]
             self.panel((1045, y, 355, 138 if i == 0 else 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
+            if i == g.current and g.winner is None:
+                self.draw_turn_marker(1037, y + 29)
             self.circle(COLORS[i], (1065, y + 20), 5)
             self.text(p.name, 1080, y + 9, 20, LIGHT, bold=True)
             points = g.points(i, i == 0 or g.winner is not None)
@@ -639,13 +728,24 @@ class App:
             if badges:
                 self.text(badges, 1360, y + 35, 13, GOLD)
 
-        # Keep private resource counts beside your own public player details.
-        for i, r in enumerate(RESOURCES):
-            x = 1055 + i * 68
-            self.panel((x, 181, 64, 64), (32, 56, 61), 7)
-            self.text(r.title(), x + 32, 193, 12, LIGHT, center=True)
-            self.text(g.players[0].hand[r], x + 32, 216, 23, GOLD, bold=True, center=True)
-            self.text(f"{g.bank[r]} · {g.ratio(0, r)}:1", x + 32, 236, 11, MUTED, center=True)
+            # Private resources travel with the human's seat in turn order.
+            if i == 0:
+                for column, r in enumerate(RESOURCES):
+                    x = 1055 + column * 68
+                    self.panel((x, y + 64, 64, 64), (32, 56, 61), 7)
+                    self.text(r.title(), x + 32, y + 76, 12, LIGHT, center=True)
+                    self.text(p.hand[r], x + 32, y + 99, 23, GOLD, bold=True, center=True)
+                    self.text(f"{g.bank[r]} · {g.ratio(0, r)}:1", x + 32, y + 119, 11, MUTED, center=True)
+            y += 146 if i == 0 else 66
+
+    def draw_turn_marker(self, x, y):
+        """A gold, compass-like arrow pointing into the current player's box."""
+        color = self.human_attention_color() if self.game.current == 0 else GOLD
+        self.line(color, (x - 28, y), (x - 7, y), 2)
+        self.polygon(color, [(x, y), (x - 12, y - 8), (x - 9, y), (x - 12, y + 8)])
+        self.polygon(color, [(x - 32, y), (x - 28, y - 4), (x - 24, y), (x - 28, y + 4)])
+        self.line(color, (x - 21, y - 5), (x - 17, y), 1)
+        self.line(color, (x - 21, y + 5), (x - 17, y), 1)
 
     def draw_actions(self):
         g = self.game
@@ -871,7 +971,8 @@ class App:
             self.tile_cache.clear()
         self.buttons = []
         self.canvas.fill(INK)
-        self.draw_board()
+        if self.started or not self.menu:
+            self.draw_board()
         self.draw_header()
         if self.menu:
             with self.shifted((self.width - W) / 2, (self.height - H) / 2):
