@@ -107,6 +107,9 @@ def test_full_game_through_ui_action_paths(app, monkeypatch, opponents):
     monkeypatch.setattr(app, "autosave", lambda: None)
     rendered = set()
     for _ in range(16000):
+        # Exercise the skip control so full-game checks do not wait on wall time.
+        if app.pacing.busy:
+            app.skip_presentation()
         g = app.game
         if g.phase not in rendered:
             app.render()
@@ -374,7 +377,7 @@ def test_phase_banner_identifies_human_response_during_computer_turn(app, monkey
 
 @pytest.mark.parametrize("opponents", [2, 3])
 @pytest.mark.parametrize("first", [0, 1, 2])
-def test_sidebar_follows_turn_order_and_keeps_resources_with_human(app, monkeypatch, opponents, first):
+def test_sidebar_follows_turn_order_with_equal_sized_player_rows(app, monkeypatch, opponents, first):
     g = app.game = Game(bots=opponents, seed=1)
     order = [(first + offset) % len(g.players) for offset in range(len(g.players))]
     g.setup_order = order + order[::-1]
@@ -385,7 +388,7 @@ def test_sidebar_follows_turn_order_and_keeps_resources_with_human(app, monkeypa
     y = 117
     for player in order:
         seats[player] = y
-        y += 146 if player == 0 else 66
+        y += 66
     for current in reversed(order):
         g.current = current
         before = g.to_dict()
@@ -394,7 +397,6 @@ def test_sidebar_follows_turn_order_and_keeps_resources_with_human(app, monkeypa
         app.draw_players()
         names = [(label, y) for label, x, y in labels if label in {p.name for p in g.players}]
         assert names == [(g.players[player].name, seats[player] + 9) for player in order]
-        assert ("Wood", 1087, seats[0] + 76) in labels
         assert markers == [(1037, seats[current] + 29)]
         assert g.to_dict() == before
 
@@ -414,7 +416,7 @@ def test_sidebar_marker_tracks_turn_owner_during_responses(app, monkeypatch, pha
         assert g.actor == 0
         order = g.setup_order[:len(g.players)]
         preceding = order[:order.index(g.current)]
-        assert markers[0] == (1037, 117 + sum(146 if i == 0 else 66 for i in preceding) + 29)
+        assert markers[0] == (1037, 117 + 66 * len(preceding) + 29)
 
 
 @pytest.mark.parametrize("size", [(960, 640), (1440, 960), (2560, 1080)])
@@ -545,3 +547,39 @@ def test_bank_trade_tooltip_explains_all_blockers(app):
     assert "You need 4 more wood" in message
     assert "bank has no wood" in message
     assert not any(button.collidepoint(rect.center) for button, _ in app.buttons)
+
+
+@pytest.mark.parametrize("size", [(720, 480), (1440, 960), (2560, 1080)])
+def test_resource_strip_stays_visible_and_shows_only_human_hand(app, monkeypatch, size):
+    from unsettled.engine import RESOURCES
+    app.window = pg.display.set_mode(size)
+    app.sync_canvas()
+    g = app.game
+    g.current = 1
+    g.players[0].hand.update(dict(zip(RESOURCES, (1, 2, 3, 4, 5))))
+    g.players[1].hand.update(dict.fromkeys(RESOURCES, 19))
+    counts = []
+    monkeypatch.setattr(app, "text", lambda label, *args, **kwargs: counts.append(label) if isinstance(label, int) else None)
+    before = g.to_dict()
+    with app.shifted((app.width - 1440) / 2, app.height - 960):
+        app.draw_resource_bar()
+    assert counts == [1, 2, 3, 4, 5]
+    assert len(app.tooltips) == 5
+    for (rect, message), resource in zip(app.tooltips, RESOURCES):
+        assert app.canvas.get_rect().contains(app.rect(rect))
+        assert message.startswith(f"{resource.title()}: {g.players[0].hand[resource]} in your hand.")
+        assert f"{g.ratio(0, resource)}:1" in message
+    assert g.to_dict() == before
+
+
+@pytest.mark.parametrize("perspective", [False, True])
+def test_settlement_placement_markers_are_white_in_both_views(app, perspective):
+    from unsettled.ui import WHITE
+    app.perspective = perspective
+    app.menu = False
+    g = app.game
+    g.current = 0
+    g.setup_order = [0, 1, 2, 3, 3, 2, 1, 0]
+    app.render()
+    vertex = min(g.settlement_sites(0, True), key=lambda v: abs(app.screen_point(v)[0] - 520))
+    assert app.canvas.get_at(app.point(app.screen_point(vertex)))[:3] == WHITE

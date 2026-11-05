@@ -10,11 +10,13 @@ import pygame as pg
 from .engine import Game, RuleError, RESOURCES, COSTS
 from . import bots, persistence
 from .perspective import Camera, Scene
+from .presentation import TurnPresentation
 
 W, H = 1440, 960
 INK = (18, 38, 46)
 PANEL = (24, 46, 53)
 LIGHT = (244, 235, 214)
+WHITE = (255, 255, 255)
 MUTED = (162, 185, 181)
 GOLD = (222, 180, 105)
 WATER = (135, 198, 228)
@@ -48,6 +50,7 @@ class App:
         self.seed_text = str(seed)
         self.edit_seed = False
         self.speed = 1
+        self.pacing = TurnPresentation()
         self.buttons = []
         self.tooltips = []
         self.tooltip_target = None
@@ -252,6 +255,8 @@ class App:
             return effect
         if g.winner is not None:
             reason = "The game has ended."
+        elif self.pacing.blocks_input:
+            reason = "Wait for the roll presentation to finish, or press Space to skip."
         elif g.actor != 0 or g.current != 0:
             reason = "Wait for your turn to play this card."
         elif g.phase not in ("roll", "main"):
@@ -281,6 +286,7 @@ class App:
             self.notify(f"Autosave failed: {exc}. Use Save to retry.", 15000)
 
     def act(self, action, **data):
+        before = self.pacing.snapshot(self.game)
         try:
             self.game.command(0, action, **data)
         except RuleError as exc:
@@ -289,6 +295,7 @@ class App:
         self.mode = None
         self.modal = None
         self.last_action = pg.time.get_ticks()
+        self.pacing.observe(before, self.game, dict(action=action, **data), self.last_action, self.speed)
         self.schedule_bot()
         self.autosave()
         return True
@@ -297,12 +304,12 @@ class App:
         return (4000, 2500, 1200)[self.speed]
 
     def schedule_bot(self):
-        self.bot_wait_started = pg.time.get_ticks()
+        self.bot_wait_started = max(pg.time.get_ticks(), self.pacing.ends_at if self.pacing.busy else 0)
         self.bot_wait_duration = self.delay()
         self.next_bot = self.bot_wait_started + self.bot_wait_duration
 
     def bot_progress(self):
-        if self.menu or self.modal or self.autosave_error or self.game.actor == 0:
+        if self.menu or self.modal or self.autosave_error or self.game.actor == 0 or self.pacing.busy:
             return None
         duration = getattr(self, "bot_wait_duration", self.delay())
         return max(0.0, min(1.0, 1 - (self.next_bot - pg.time.get_ticks()) / duration))
@@ -322,6 +329,7 @@ class App:
             self.notify(str(exc), 10000)
             return
         self.game = game
+        self.pacing.clear()
         self.menu = False
         self.started = True
         self.mode = self.modal = None
@@ -341,6 +349,7 @@ class App:
         self.started = True
         self.mode = self.modal = None
         self.tile_cache.clear()
+        self.pacing.announce(self.game, pg.time.get_ticks(), self.speed)
         self.schedule_bot()
         self.autosave()
 
@@ -736,12 +745,10 @@ class App:
         self.circle((137, 148, 145), (cx - 2, cy - 14), 2)
         if not self.menu and g.actor == 0 and g.phase != "game_over":
             mode = self.active_mode()
-            pulse = 4 + int(math.sin(pg.time.get_ticks() / 230) * 2)
             if mode in ("settlement", "city"):
                 sites = g.city_sites(0) if mode == "city" else g.settlement_sites(0, g.phase == "setup_settlement")
                 for v in sites:
-                    self.circle(LIGHT, self.screen_point(v), 10, 2)
-                    self.circle(GOLD, self.screen_point(v), pulse)
+                    self.draw_placement_marker(self.screen_point(v))
             elif mode == "road":
                 for e in g.road_sites(0, g.setup_vertex if g.phase == "setup_road" else None):
                     a, b = [self.screen_point(v) for v in g.board.edges[e]]
@@ -754,6 +761,11 @@ class App:
         # Placed pieces sit above tile seams and all placement guides.
         for v, (owner, size) in g.buildings.items():
             self.draw_piece(v, owner, size)
+
+    def draw_placement_marker(self, position, compact=False):
+        radius = (8 if compact else 10) + 1.5 * math.sin(pg.time.get_ticks() / 350)
+        self.circle(WHITE, position, radius, 2)
+        self.circle(WHITE, position, 3)
 
     @staticmethod
     def piece_tone(owner, light=0):
@@ -841,7 +853,7 @@ class App:
             self.circle((48, 55, 54), (x + size * px, y + size * py), 3)
 
     def draw_dice(self):
-        dice = self.game.dice
+        dice = self.pacing.dice_for(self.game)
         self.text("LAST ROLL", 50, 706, 12, GOLD, bold=True)
         for i in range(2):
             self.draw_die(dice[i] if dice else None, 50 + i * 49, 727)
@@ -876,7 +888,7 @@ class App:
 
     def human_attention_color(self):
         """Breathe gently while waiting for human input; keep text steady."""
-        if (self.menu or self.autosave_error or self.game.winner is not None
+        if (self.menu or self.autosave_error or self.pacing.blocks_input or self.game.winner is not None
                 or self.game.actor != 0
                 or (self.modal and self.modal["kind"] == "journal")):
             return GOLD
@@ -903,12 +915,17 @@ class App:
             owner = "YOUR TURN" if g.current == 0 else f"{g.players[g.current].name.upper()}'S TURN"
             heading = f"TURN {g.turn + 1}  /  {owner}"
         self.text(heading, 336, 21, 12, color, bold=True)
-        self.text(phases[g.phase], 336, 39, 23, LIGHT, bold=True)
+        phase_label = phases[g.phase]
+        if self.pacing.blocks_input:
+            phase_label = {"dice": "Dice roll", "harvest": "Production", "transfer": "Distribute resources", "phase": phase_label}[self.pacing.effects[0].kind]
+        self.text(phase_label, 336, 39, 23, LIGHT, bold=True)
         if g.winner is None:
             if self.autosave_error:
                 detail = "Paused · save to retry"
             elif self.modal:
                 detail = "Paused"
+            elif self.pacing.blocks_input:
+                detail = "Turn unfolding · Space to skip"
             elif human:
                 detail = "Your move · take your time"
             else:
@@ -932,28 +949,20 @@ class App:
         y = 117
         for i in g.setup_order[:len(g.players)]:
             p = g.players[i]
-            self.panel((1045, y, 355, 138 if i == 0 else 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
+            self.panel((1045, y, 355, 58), (38, 65, 70) if i == g.current else PANEL, 10, GOLD if i == g.current else None)
             if i == g.current and g.winner is None:
                 self.draw_turn_marker(1037, y + 29)
             self.circle(COLORS[i], (1065, y + 20), 5)
             self.text(p.name, 1080, y + 9, 20, LIGHT, bold=True)
             points = g.points(i, i == 0 or g.winner is not None)
             self.text(f"{points} VP", 1340, y + 9, 20, GOLD, bold=True)
-            detail = f"{sum(p.hand.values())} resources   {len(p.cards)} cards   {p.knights} knights"
+            detail = f"{sum(self.pacing.hand_for(i, g).values())} resources   {len(p.cards)} cards   {p.knights} knights"
             self.text(detail, 1080, y + 35, 13, MUTED)
             badges = ("R" if g.longest == i else "") + ("A" if g.army == i else "")
             if badges:
                 self.text(badges, 1360, y + 35, 13, GOLD)
 
-            # Private resources travel with the human's seat in turn order.
-            if i == 0:
-                for column, r in enumerate(RESOURCES):
-                    x = 1055 + column * 68
-                    self.panel((x, y + 64, 64, 64), (32, 56, 61), 7)
-                    self.text(r.title(), x + 32, y + 76, 12, LIGHT, center=True)
-                    self.text(p.hand[r], x + 32, y + 99, 23, GOLD, bold=True, center=True)
-                    self.text(f"{g.bank[r]} · {g.ratio(0, r)}:1", x + 32, y + 119, 11, MUTED, center=True)
-            y += 146 if i == 0 else 66
+            y += 66
 
     def draw_turn_marker(self, x, y):
         """A gold, compass-like arrow pointing into the current player's box."""
@@ -966,7 +975,8 @@ class App:
 
     def draw_actions(self):
         g = self.game
-        self.text("YOUR NEXT MOVE" if g.actor == 0 else "AT THE TABLE", 1060, 399, 13, GOLD, bold=True)
+        title = "TURN EVENTS" if self.pacing.blocks_input else "YOUR NEXT MOVE" if g.actor == 0 else "AT THE TABLE"
+        self.text(title, 1060, 399, 13, GOLD, bold=True)
         human = g.actor == 0
         explanations = {
             "setup_settlement": "Choose a highlighted intersection for your settlement.",
@@ -983,8 +993,15 @@ class App:
             "game_over": f"{g.players[g.winner if g.winner is not None else 0].name} wins! Start another island from the menu.",
         }
         message = explanations[g.phase] if human or g.phase == "game_over" else f"{g.players[g.actor].name} is considering their move…"
+        if self.pacing.blocks_input:
+            message = {"dice": "Revealing the dice roll.", "harvest": "Matching tiles produce resources.",
+                       "transfer": "Resources are arriving in each player's hand.", "phase": message}[self.pacing.effects[0].kind]
         self.wrap(message, 1060, 427, 320, 19, LIGHT, 3)
         y = 510
+        if self.pacing.blocks_input:
+            self.wrap("Watching the turn unfold…", 1060, y, 320, 18, MUTED, 2)
+            self.text("Space to skip", 1060, y + 45, 14, MUTED)
+            return
         if g.phase == "game_over":
             self.button("Back to menu", (1060, y, 320, 44), self.toggle_menu, accent=True)
         elif human:
@@ -1013,10 +1030,69 @@ class App:
         self.text(f"TURN {self.game.turn + 1}", 910, 837, 14, MUTED)
 
     def resource_icon(self, r, x, y):
-        color = TERRAIN[TILE_ORDER.index(r)]
-        self.circle(color, (x, y), 13)
-        letter = {"wood": "W", "brick": "B", "wheat": "G", "sheep": "S", "ore": "O"}[r]
-        self.text(letter, x, y, 14, LIGHT, bold=True, center=True)
+        """Small silhouettes stay recognizable without relying on color or letters."""
+        def polygon(color, points):
+            self.polygon(color, [(x + px, y + py) for px, py in points])
+
+        if r == "wood":
+            self.line((119, 86, 50), (x, y + 2), (x, y + 11), 4)
+            for top, width in ((-12, 7), (-7, 10), (-1, 12)):
+                polygon((78, 157, 104), [(0, top), (-width, top + 10), (width, top + 10)])
+                self.line((119, 187, 122), (x, y + top + 2), (x - width + 3, y + top + 8))
+        elif r == "brick":
+            for left, top in ((-11, -1), (1, -1), (-5, -9)):
+                polygon((195, 106, 76), [(left, top), (left + 10, top), (left + 10, top + 8), (left, top + 8)])
+                self.line((239, 155, 107), (x + left, y + top), (x + left + 9, y + top))
+                self.line((128, 67, 52), (x + left, y + top + 7), (x + left + 10, y + top + 7))
+        elif r == "wheat":
+            self.line((211, 170, 77), (x - 1, y + 12), (x + 1, y - 12), 2)
+            for height in (-8, -3, 2, 7):
+                for side in (-1, 1):
+                    polygon((235, 196, 100), [(0, height + 3), (side * 7, height), (side * 6, height - 4), (0, height - 1)])
+        elif r == "sheep":
+            for leg in (-6, 5):
+                self.line((120, 123, 110), (x + leg, y + 4), (x + leg, y + 10), 2)
+            for dx, dy, radius in ((-5, -1, 6), (1, -3, 7), (6, 1, 5), (-1, 3, 6)):
+                self.circle((235, 236, 223), (x + dx, y + dy), radius)
+            self.ellipse((105, 112, 107), (x + 6, y - 3, 7, 9))
+            self.circle(WHITE, (x + 10, y - 1), 1)
+        elif r == "ore":
+            polygon((161, 179, 200), [(-12, 8), (-7, -5), (1, -11), (10, -4), (13, 8)])
+            polygon((204, 218, 229), [(-7, -5), (1, -11), (1, 5), (-12, 8)])
+            polygon((102, 127, 153), [(1, -11), (10, -4), (13, 8), (1, 5)])
+
+    def resource_target(self, resource):
+        column = RESOURCES.index(resource)
+        return (218 + column * 154 + (self.width - W) / 2, 890 + self.height - H)
+
+    def player_target(self, owner):
+        order = self.game.setup_order[:len(self.game.players)]
+        return (1065 + self.width - W, 146 + order.index(owner) * 66)
+
+    def toggle_motion(self):
+        self.pacing.reduced_motion = not self.pacing.reduced_motion
+        self.skip_presentation()
+
+    def skip_presentation(self):
+        self.pacing.clear()
+        self.pacing.advance(pg.time.get_ticks())
+        self.schedule_bot()
+
+    def draw_resource_bar(self):
+        self.panel((45, 873, 950, 35), PANEL, 8)
+        self.text("YOUR RESOURCES", 61, 884, 11, MUTED, bold=True)
+        hand = self.pacing.hand_for(0, self.game)
+        for column, resource in enumerate(RESOURCES):
+            x = 195 + column * 154
+            rect = pg.Rect(x, 875, 144, 31)
+            hover = rect.move(self.offset).collidepoint(self.mouse())
+            if hover:
+                self.panel(rect, (38, 65, 70), 6)
+            self.resource_icon(resource, x + 23, 890)
+            self.text(hand[resource], x + 48, 878, 22, WHITE, bold=True)
+            self.tooltips.append((rect.move(self.offset),
+                f"{resource.title()}: {hand[resource]} in your hand.\n"
+                f"Bank: {self.game.bank[resource]} available. Your bank/port rate: {self.game.ratio(0, resource)}:1."))
 
     def draw_hand(self):
         g = self.game
@@ -1029,17 +1105,17 @@ class App:
         counts = CounterCards(g.players[0].cards)
         x = 45
         if not counts:
-            self.text("Development cards will appear here.", x, 912, 16, MUTED)
+            self.text("Development cards will appear here.", x, 925, 15, MUTED)
         for card, count in counts.items():
             label = f"{CARD_NAMES[card]} ×{count}"
             width = max(150, self.font(16).size(label)[0] + 28)
-            self.button(label, (x, 900, width, 37), lambda c=card: self.act("play", card=c), active=g.actor == 0 and g.phase in ("roll", "main") and card in g.playable(0), small=True, tooltip=self.card_tooltip(card))
+            self.button(label, (x, 917, width, 32), lambda c=card: self.act("play", card=c), active=not self.pacing.blocks_input and g.actor == 0 and g.phase in ("roll", "main") and card in g.playable(0), small=True, tooltip=self.card_tooltip(card))
             x += width + 10
 
     def draw_log(self):
         self.text("TABLE JOURNAL", 1060, 710, 13, GOLD, bold=True)
         # Expanded journal opens on L; compact view keeps the board uncluttered.
-        latest = self.game.log[-1]
+        latest = self.pacing.log_for(self.game)
         self.wrap(latest, 1060, 741, 320, 16, MUTED, 2)
         self.button("Journal", (1280, 702, 100, 29), lambda: self.open_modal("journal"), small=True)
 
@@ -1075,7 +1151,10 @@ class App:
         self.button("Set sail", (875, 693, 435, 51), self.new_game, accent=True)
         self.button("Resume autosave", (875, 758, 435, 40), self.load)
         if self.started:
-            self.button("Return to current game", (875, 811, 435, 39), self.toggle_menu)
+            self.button("Return to game", (875, 811, 210, 39), self.toggle_menu)
+        self.button("Motion: Reduced" if self.pacing.reduced_motion else "Motion: Full",
+                    (1100, 811, 210, 39), self.toggle_motion, small=True,
+                    tooltip="Reduced motion uses short, static cues instead of rolling dice and flying resources.")
         self.text("Base game • 3–4 players • First to 10 points", 875, 864, 14, MUTED)
 
     def toggle_difficulty(self, index):
@@ -1204,9 +1283,12 @@ class App:
             self.tile_cache.clear()
         self.buttons = []
         self.tooltips = []
+        self.pacing.advance(pg.time.get_ticks(), paused=self.menu or self.modal is not None)
         self.canvas.fill(INK)
         if self.started or not self.menu:
             self.draw_board()
+            if not self.menu:
+                self.pacing.draw_board(self)
         self.draw_header()
         if not self.menu:
             self.draw_view_controls()
@@ -1216,15 +1298,16 @@ class App:
         else:
             with self.shifted(self.width - W):
                 self.draw_players()
-                with self.shifted(y=80):
-                    self.draw_actions()
+                self.draw_actions()
             with self.shifted((self.width - W) / 2, self.height - H):
                 self.draw_board_status()
+                self.draw_resource_bar()
             with self.shifted(y=self.height - H):
                 self.draw_hand()
             with self.shifted(self.width - W, self.height - H):
-                with self.shifted(y=80):
-                    self.draw_log()
+                self.draw_log()
+        if not self.menu:
+            self.pacing.draw_overlay(self)
         if self.modal:
             with self.shifted((self.width - W) / 2, (self.height - H) / 2):
                 self.draw_modal()
@@ -1239,7 +1322,7 @@ class App:
 
     def board_click(self, pos):
         g = self.game
-        if self.menu or self.modal or g.actor != 0 or g.phase == "game_over":
+        if self.menu or self.modal or self.pacing.blocks_input or g.actor != 0 or g.phase == "game_over":
             return
         if self.perspective:
             self.perspective_board_click(pos)
@@ -1267,7 +1350,11 @@ class App:
 
     def update(self):
         g = self.game
+        self.pacing.advance(pg.time.get_ticks(), paused=self.menu or self.modal is not None)
         if self.menu or g.winner is not None:
+            return
+        if self.pacing.busy:
+            self.schedule_bot()
             return
         if g.actor == 0:
             if g.phase == "trade" and self.modal is None:
@@ -1278,7 +1365,9 @@ class App:
             return
         if pg.time.get_ticks() >= self.next_bot:
             try:
-                bots.step(g)
+                before = self.pacing.snapshot(g)
+                command = bots.step(g)
+                self.pacing.observe(before, g, command or {}, pg.time.get_ticks(), self.speed)
                 self.autosave()
             except (RuleError, ValueError) as exc:
                 self.autosave_error = True
@@ -1305,6 +1394,8 @@ class App:
                     if not self.fullscreen:
                         self.window = pg.display.set_mode((max(720, event.w), max(480, event.h)), pg.RESIZABLE)
                     self.sync_canvas()
+                elif event.type == pg.KEYDOWN and event.key == pg.K_SPACE and self.pacing.busy and not self.menu and not self.modal:
+                    self.skip_presentation()
                 elif self.camera_event(event):
                     pass
                 elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:

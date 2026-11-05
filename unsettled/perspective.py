@@ -480,8 +480,7 @@ class Scene:
         if mode in ('settlement', 'city'):
             sites = app.game.city_sites(0) if mode == 'city' else app.game.settlement_sites(0, app.game.phase == 'setup_settlement')
             for v in sites:
-                app.circle(LIGHT, app.screen_point(v), 7, 1)
-                app.circle(GOLD, app.screen_point(v), 3)
+                app.draw_placement_marker(app.screen_point(v), compact=True)
         elif mode == 'road':
             for edge in app.game.road_sites(0, app.game.setup_vertex if app.game.phase == 'setup_road' else None):
                 a, b = [app.screen_point(v) for v in board.edges[edge]]

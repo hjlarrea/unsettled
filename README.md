@@ -85,20 +85,26 @@ Click **Set sail** to start.
 - The header highlights the current turn and phase, including trade responses
   and robber decisions. During computer turns, its bar fills until the next
   action; each action starts a fresh bar. Dialogs pause computer play.
-- **Slow / Normal / Fast** pauses 4.0 / 2.5 / 1.2 seconds between bot actions.
-  Normal is the default. No human decision has a time limit. Open **Menu** to pause and configure a new game.
+- Turns have a short announcement, a central dice reveal, producing-tile
+  highlights, and resource transfers into the appropriate player panel or your
+  resource strip. Counts increase as resources arrive. Sevens lead into discard
+  or robber instructions; bank shortages show only resources actually paid.
+- **Space** skips the current presentation. **Motion: Full / Reduced** in the
+  menu switches to short, static cues. Effects pause while a menu or dialog is open.
+- **Slow / Normal / Fast** pauses 4.0 / 2.5 / 1.2 seconds between bot actions,
+  after any presentation finishes; it also adjusts new effects. Normal is the default. No human decision has a time limit. Open **Menu** to pause and configure a new game.
 - **Journal** or **L** opens the public event history. **Escape** closes a dialog,
   cancels a selected build tool, or opens/closes the menu. **Cmd+S** / **Ctrl+S**
   saves manually.
 - **Full screen**, **F11**, or **Cmd+F** / **Ctrl+F** toggles full-screen mode.
   **Escape** returns to the window after closing any dialog or build tool.
   Resizing and full-screen mode use the entire window: controls anchor to the
-  right, resource counters sit beneath your player details, and the board
+  right, resource counters stay in a strip below the board, and the board
   centers below the title bar.
   Tiles keep their proportions and text stays sharp.
 
-Your resource counters appear inside your player panel on the right. Each shows
-your count, with the bank supply and port ratio underneath. Your resource cards
+Your resources appear in a fixed strip below the board, with an icon and your
+count for each resource. Hover to see its name, bank supply, and your port rate. Your resource cards
 and development-card identities remain private. Opponent
 hand sizes, development-card counts, played knights, and public victory points
 are visible. **R** and **A** mark Longest Road and Largest Army. Opponents' hidden
