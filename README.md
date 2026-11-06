@@ -15,7 +15,45 @@ moored sailboats mark the nine ports. Beveled roads and faceted settlements and 
 the board a painted wooden-piece feel. Text renders at the window's native
 resolution.
 
-## Set up on macOS
+## Download and run
+
+Download a published build from
+[GitHub Releases](https://github.com/hjlarrea/unsettled/releases). Python and
+Pygame are bundled; no Python installation or Homebrew is needed.
+
+| Computer | Download | How to launch |
+| --- | --- | --- |
+| Windows x64 | `Unsettled-VERSION-windows-x64.zip` | Extract the whole ZIP, then open `Unsettled/Unsettled.exe`. |
+| macOS Apple Silicon (M1 or later) | `Unsettled-VERSION-macos-arm64.zip` | Extract in Finder, drag `Unsettled.app` into Applications, then open it. |
+| Intel Mac or Linux | Source code | Follow the source setup instructions below; no automated binary is currently provided. |
+
+Keep the Windows executable and its `_internal` folder together. Choose the
+platform ZIP under **Assets**, rather than GitHub's automatically generated
+**Source code** archives. If no release is published yet, run from source.
+
+**No publisher signing yet:** Windows downloads are unsigned and may trigger
+SmartScreen or antivirus warnings. macOS downloads have an ad hoc signature
+only; they are not Developer ID signed or Apple-notarized, so macOS may block
+the first launch. Where permitted, Windows may offer **More info → Run anyway**;
+macOS may offer **System Settings → Privacy & Security → Open Anyway** after an
+attempted launch. Managed computers may prohibit these exceptions. See the
+[full download instructions](packaging/DOWNLOAD_README.md) for details.
+
+Updates are manual: quit the game and replace the entire app or Windows folder
+with the new download. Saves live outside the application.
+
+For source code, use **Code → Download ZIP** on GitHub or clone the repository:
+
+```sh
+git clone https://github.com/hjlarrea/unsettled.git
+cd unsettled
+```
+
+Linux users can create a Python 3.13 virtual environment, install
+`requirements.txt`, and run `python -m unsettled`; Linux is source-only and is
+not part of the binary release checks.
+
+## Run from source on macOS
 
 Install [pyenv](https://github.com/pyenv/pyenv#installation) if it is not already
 available, and enable its shell integration as described in its documentation.
@@ -180,6 +218,10 @@ bundled. See [asset provenance](unsettled/assets/README.md).
 
 ## Development and verification
 
+For Windows/macOS packaging, tag-triggered builds from `main`, and publishing
+downloads, see [building and releasing](packaging/README.md). Successful release
+builds create a draft that a maintainer reviews and publishes.
+
 ```sh
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
@@ -209,3 +251,16 @@ without embedding game rules in rendering code.
 Automated UI checks use SDL's dummy video driver. These verify dialog flows and
 full human-seat command sequences, but do not replace hands-on usability testing
 of a real macOS window.
+
+## License
+
+Unsettled is free and open source under the [Zero-Clause BSD (0BSD) license](LICENSE).
+You may use, copy, modify, and redistribute it for any purpose, including
+commercial use, without attribution or a requirement to publish your changes.
+The software is provided without warranty.
+
+The license covers this project's code, documentation, and original artwork,
+to the extent applicable rights are held by the project contributors.
+Third-party dependencies remain under their own licenses; this license does not
+grant rights to third-party trademarks or other third-party material.
+See [asset provenance](unsettled/assets/README.md) for the artwork's origins.

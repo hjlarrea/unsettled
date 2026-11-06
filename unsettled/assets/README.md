@@ -1,5 +1,9 @@
 # Terrain artwork
 
+The project's original artwork is provided under the
+[Zero-Clause BSD (0BSD) license](../../LICENSE), to the extent applicable rights
+are held by the project contributors. Third-party rights are not licensed here.
+
 `terrain-classic.png` is the active terrain atlas. It contains original
 AI-generated watercolor-style art created for Unsettled using OpenAI image
 generation on 2026-11-01, guided by a user-supplied photo of physical game tiles.
